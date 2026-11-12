@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#ECEEF0">
+<title>Practice spots</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  /* Colours borrowed from UK road signs */
+  :root {
+    --white: #FFFFFF;
+    --black: #000000;
+    --pavement: #ECEEF0;      /* page background */
+    --kerb: #4E555C;          /* quieter text */
+    --red: #C8102E;           /* warning and stop signs */
+    --blue: #0B57A4;          /* parking signs */
+    --yellow: #FFD200;        /* the main button */
+    --font: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--pavement);
+    color: var(--black);
+    font: 17px/1.45 var(--font);
+  }
+  .page { max-width: 600px; margin: 0 auto; }
+
+  /* Top: title and the two ways to choose a start point */
+  .top { padding: 22px 16px 6px; }
+  h1 { margin: 0; font-size: 34px; line-height: 1.05; letter-spacing: -0.01em; }
+  .lede { margin: 6px 0 16px; color: var(--kerb); }
+  .find { display: grid; gap: 10px; }
+  .search { display: flex; gap: 8px; }
+  .search input {
+    flex: 1; min-width: 0;
+    font: inherit; padding: 0 14px; min-height: 50px;
+    border: 2px solid var(--black); border-radius: 10px; background: var(--white); color: var(--black);
+  }
+  .status { margin: 12px 0 0; min-height: 1.45em; }
+  .status.problem { color: var(--red); font-weight: 700; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 50px; padding: 0 18px;
+    font: inherit; font-weight: 700; color: var(--black); text-decoration: none;
+    border: 2px solid var(--black); border-radius: 10px; background: var(--white);
+    cursor: pointer;
+  }
+  .btn-go { background: var(--yellow); }
+  .btn[disabled] { opacity: 0.55; cursor: progress; }
+  :focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+
+  /* Which type of spot to show */
+  .kinds {
+    display: flex; gap: 8px; overflow-x: auto;
+    padding: 10px 16px 14px; scrollbar-width: none;
+  }
+  .kinds::-webkit-scrollbar { display: none; }
+  .kind {
+    flex: none; min-height: 40px; padding: 0 14px;
+    font: inherit; font-size: 16px; color: var(--black);
+    border: 2px solid var(--black); border-radius: 999px; background: transparent;
+    cursor: pointer;
+  }
+  .kind[aria-pressed="true"] { background: var(--black); color: var(--white); }
+
+  .map { height: 42vh; min-height: 260px; border-block: 2px solid var(--black); background: #D9DCDF; }
+  .map[hidden] { display: none; }
+
+  /* The spots, laid out like local direction signs: name on the left, miles on the right */
+  .list { padding: 18px 16px 8px; }
+  .group + .group { margin-top: 28px; }
+  .group-title {
+    display: flex; align-items: center; gap: 10px;
+    margin: 0 0 12px; font-size: 21px; line-height: 1.2;
+  }
+  .symbol { display: inline-flex; width: 28px; height: 28px; flex: none; }
+  .symbol svg { width: 100%; height: 100%; }
+  .sign {
+    background: var(--white);
+    border: 3px solid var(--black); border-radius: 12px;
+    padding: 12px 14px 14px;
+  }
+  .sign + .sign { margin-top: 12px; }
+  .sign-head { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 12px; }
+  .sign-name { margin: 0; font-size: 23px; line-height: 1.15; }
+  .name-btn {
+    font: inherit; color: inherit; text-align: left;
+    background: none; border: 0; padding: 0; margin: 0; cursor: pointer;
+  }
+  .miles { margin: 0; font-size: 28px; font-weight: 700; line-height: 1; white-space: nowrap; }
+  .miles small { font-size: 15px; font-weight: 400; margin-left: 3px; }
+  .why { margin: 8px 0 0; }
+  .note, .also { margin: 4px 0 0; color: var(--kerb); }
+  .warn { margin: 6px 0 0; font-weight: 700; color: var(--red); }
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+  .actions .btn { padding: 0 10px; }
+  .actions .btn-go:nth-last-child(3) { grid-column: 1 / -1; }  /* iPhone: Navigate gets its own row */
+  .more {
+    margin-top: 12px; padding: 6px 0; min-height: 44px;
+    font: inherit; font-weight: 700; color: var(--blue);
+    background: none; border: 0; text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+  }
+
+  .foot { padding: 8px 16px 44px; color: var(--kerb); font-size: 15px; }
+  .foot p { margin: 0 0 10px; max-width: 62ch; }
+  .foot a { color: inherit; }
+
+  /* Map markers and popups */
+  .spot-icon svg { width: 28px; height: 28px; filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff); }
+  .me {
+    display: block; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--blue); border: 3px solid var(--white);
+    box-shadow: 0 0 0 2px var(--blue);
+  }
+  .leaflet-container { font: 15px/1.4 var(--font); }
+  .popup-name { font-weight: 700; font-size: 17px; }
+  .popup-links { margin-top: 6px; display: flex; gap: 14px; }
+
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <h1>Practice spots</h1>
+    <p class="lede">Quiet streets and car parks to practise in, nearest first.</p>
+    <div class="find">
+      <button id="locate" class="btn btn-go" type="button">Use my location</button>
+      <form id="search" class="search" role="search">
+        <label for="place" class="visually-hidden">Postcode or town</label>
+        <input id="place" name="place" type="search" placeholder="Postcode or town"
+               autocomplete="postal-code" enterkeyhint="search" spellcheck="false">
+        <button class="btn" type="submit">Search</button>
+      </form>
+    </div>
+    <p id="status" class="status" role="status" aria-live="polite">Loading spots...</p>
+  </header>
+  <div id="kinds" class="kinds" role="group" aria-label="Type of spot"></div>
+</div>
+<div id="map" class="map" role="region" aria-label="Map of practice spots"></div>
+<div class="page">
+  <main id="list" class="list"></main>
+  <footer class="foot">
+    <p>Check a spot in Street View before you go. Set your route before you drive: using a hand-held
+       phone at the wheel is illegal, and so is using one while you supervise a learner.</p>
+    <p>Distances are in a straight line. Spots are picked from OpenStreetMap data, so treat them as
+       suggestions.</p>
+    <p>Map &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors.
+       Postcode and town search by <a href="https://postcodes.io">postcodes.io</a>.</p>
+  </footer>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+"use strict";
+
+// ---------- Settings you might change ----------
+// The spot files made by the notebook, one per area. Add a file name here when you add an area.
+const SPOT_FILES = ["spots_sutton.geojson", "spots_peebles.geojson"];
+const PER_GROUP = 3;     // spots of each type shown under "All"
+const MAX_LIST = 40;     // most spots shown for one type
+const NEAR_MILES = 15;   // lists stop at this distance (unless nothing is closer)
+const FAR_MILES = 5;     // if the nearest spot is further than this, say the area isn't covered yet
+
+// ---------- Types of spot, in the order they're shown ----------
+const KINDS = [
+  { id: "kerbside", tab: "Parallel parking", title: "Parallel parking and pulling up on the right",
+    one: "Parallel parking", plural: "parallel parking spots", also: "parallel parking" },
+  { id: "bay_park", tab: "Bay parking", title: "Bay parking", one: "Bay parking", plural: "car parks",
+    also: "bay parking" },
+  { id: "hill_start", tab: "Hill starts", title: "Hill starts", one: "Hill start", plural: "hill starts",
+    also: "hill starts" },
+  { id: "emergency_stop", tab: "Emergency stops", title: "Emergency stops", one: "Emergency stop",
+    plural: "emergency stop roads", also: "emergency stops" },
+];
+const KIND = Object.fromEntries(KINDS.map(k => [k.id, k]));
+// The notebook names other good uses of a street with these labels
+const LABEL_TO_KIND = {
+  "Hill start": "hill_start", "Emergency stop": "emergency_stop",
+  "Parallel park / pull up on the right": "kerbside", "Bay parking": "bay_park",
+};
+
+// Road-sign shapes, so the types can be told apart without relying on colour
+const SYMBOLS = {
+  hill_start: '<svg viewBox="0 0 28 28" aria-hidden="true"><path d="M14 2.5 26 25H2z" fill="#fff" stroke="#C8102E" stroke-width="3" stroke-linejoin="round"/><path d="M7.5 21.5h11v-6.5z"/></svg>',
+  emergency_stop: '<svg viewBox="0 0 28 28" aria-hidden="true"><path d="M9.02 1.99h9.96l7.03 7.03v9.96l-7.03 7.03H9.02l-7.03-7.03V9.02z" fill="#C8102E"/><path d="M9.85 4h8.3l5.85 5.85v8.3L18.15 24h-8.3L4 18.15v-8.3z" fill="none" stroke="#fff" stroke-width="1.5"/></svg>',
+  kerbside: '<svg viewBox="0 0 28 28" aria-hidden="true"><rect x="1.5" y="1.5" width="25" height="25" rx="5" fill="#fff" stroke="#000" stroke-width="2"/><path d="M5 17.5v-3.2c0-.9.7-1.6 1.6-1.6h1.5l2.4-3.3c.4-.5.9-.8 1.5-.8h5.2c.6 0 1.2.3 1.5.8l2.4 3.3h.9c.9 0 1.6.7 1.6 1.6v3.2z"/><path d="M9.6 12.2l1.8-2.5h2.9v2.5zM15.3 12.2V9.7h2.6l1.8 2.5z" fill="#fff"/><circle cx="9.5" cy="18" r="2.3" stroke="#fff" stroke-width="1.2"/><circle cx="18.5" cy="18" r="2.3" stroke="#fff" stroke-width="1.2"/><rect x="4" y="21.6" width="20" height="2.4"/></svg>',
+  bay_park: '<svg viewBox="0 0 28 28" aria-hidden="true"><rect x="1" y="1" width="26" height="26" rx="4" fill="#0B57A4"/><path d="M9.5 6h7a5.5 5.5 0 0 1 0 11H13v5H9.5zM13 9.2v4.6h3.3a2.3 2.3 0 0 0 0-4.6z" fill="#fff" fill-rule="evenodd"/></svg>',
+};
+
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+               (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const REDUCED_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const state = { spots: [], origin: null, kind: "all" };
+const $ = id => document.getElementById(id);
+
+// ---------- Small helpers ----------
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props)) {
+    if (key === "className") node.className = value;
+    else if (key === "html") node.innerHTML = value;
+    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else node.setAttribute(key, value);
+  }
+  node.append(...children.filter(c => c !== null && c !== undefined && c !== ""));
+  return node;
+}
+const sentence = text => text ? text[0].toUpperCase() + text.slice(1).replace(/ m2\b/g, " m²") : "";
+const round6 = x => Number(x).toFixed(6);
+
+function milesBetween(a, b) {
+  const R = 3958.8;  // Earth's radius in miles
+  const rad = d => d * Math.PI / 180;
+  const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function formatMiles(m) {
+  if (m < 0.1) return "under 0.1";
+  return m < 10 ? m.toFixed(1) : Math.round(m).toLocaleString("en-GB");
+}
+// Like a direction sign: quarter miles up to 3 miles (never less than a quarter), whole miles after
+function signMiles(m) {
+  if (m >= 2.875) return Math.round(m).toLocaleString("en-GB");
+  const quarters = Math.max(1, Math.round(m * 4));
+  return (quarters >= 4 ? String(Math.floor(quarters / 4)) : "") + ["", "\u00BC", "\u00BD", "\u00BE"][quarters % 4];
+}
+
+function setStatus(text, problem = false) {
+  const s = $("status");
+  s.textContent = text;
+  s.classList.toggle("problem", problem);
+}
+
+// Links that open the phone's own apps
+const navigateLink = s => `https://www.google.com/maps/dir/?api=1&destination=${round6(s.navLat)},${round6(s.navLon)}&travelmode=driving`;
+const appleLink = s => `https://maps.apple.com/?daddr=${round6(s.navLat)},${round6(s.navLon)}&dirflg=d`;
+const streetViewLink = s => `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${round6(s.lat)},${round6(s.lon)}&heading=${Math.round(s.heading || 0)}`;
+
+// ---------- Loading the spots ----------
+function toSpot(feature, i, file) {
+  const p = feature.properties || {};
+  const [lon, lat] = (feature.geometry && feature.geometry.coordinates) || [p.lon, p.lat];
+  return {
+    id: `${file}#${i}`, kind: p.kind, street: p.street || "Unnamed road",
+    why: p.why || "", note: p.note || "", also: p.also || "",
+    lat: Number(p.lat ?? lat), lon: Number(p.lon ?? lon),
+    navLat: Number(p.nav_lat ?? p.lat ?? lat), navLon: Number(p.nav_lon ?? p.lon ?? lon),
+    heading: Number(p.heading || 0), nearSchool: Boolean(p.near_school),
+  };
+}
+
+async function loadSpots() {
+  const results = await Promise.allSettled(SPOT_FILES.map(async file => {
+    const res = await fetch(file, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`${file}: ${res.status}`);
+    const data = await res.json();
+    return (data.features || []).map((f, i) => toSpot(f, i, file)).filter(s => KIND[s.kind]);
+  }));
+  const missing = [];
+  results.forEach((r, i) => r.status === "fulfilled" ? state.spots.push(...r.value) : missing.push(SPOT_FILES[i]));
+  return missing;
+}
+
+// ---------- Choosing a start point ----------
+function locate() {
+  if (!("geolocation" in navigator) || !window.isSecureContext) {
+    setStatus("This browser can't share your location here. Search for a postcode or town instead.", true);
+    return;
+  }
+  const button = $("locate");
+  button.disabled = true;
+  setStatus("Finding you...");
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      button.disabled = false;
+      setOrigin({ lat: pos.coords.latitude, lon: pos.coords.longitude, label: "you" });
+    },
+    err => {
+      button.disabled = false;
+      if (err.code === err.PERMISSION_DENIED) {
+        setStatus(IS_IOS
+          ? "Location is off for this page. Search for a postcode or town instead, or turn it on in Settings > Privacy & Security > Location Services > Safari Websites."
+          : "Location is off for this page. Search for a postcode or town instead, or tap the icon to the left of the web address, then Permissions, and allow Location.", true);
+      } else {
+        setStatus("Couldn't get your location. Try again, or search for a postcode or town.", true);
+      }
+    },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+}
+
+const FULL_POSTCODE = /^[A-Z]{1,2}\d[A-Z\d]?\d[A-Z]{2}$/;
+const OUTCODE = /^[A-Z]{1,2}\d[A-Z\d]?$/;
+const PLACE_RANK = ["City", "Town", "Suburban Area", "Village", "Hamlet", "Other Settlement"];
+
+async function getJSON(url) {
+  const res = await fetch(url);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`${url}: ${res.status}`);
+  return res.json();
+}
+
+// Postcodes, the first half of a postcode (like SM1), or a place name, via postcodes.io
+async function lookUp(text) {
+  const compact = text.replace(/\s+/g, "").toUpperCase();
+  if (FULL_POSTCODE.test(compact)) {
+    const r = await getJSON(`https://api.postcodes.io/postcodes/${encodeURIComponent(compact)}`);
+    if (r && r.result && r.result.latitude != null) {
+      return { lat: r.result.latitude, lon: r.result.longitude, label: r.result.postcode };
+    }
+    return null;
+  }
+  if (OUTCODE.test(compact)) {
+    const r = await getJSON(`https://api.postcodes.io/outcodes/${encodeURIComponent(compact)}`);
+    if (r && r.result && r.result.latitude != null) {
+      return { lat: r.result.latitude, lon: r.result.longitude, label: r.result.outcode };
+    }
+  }
+  const r = await getJSON(`https://api.postcodes.io/places?q=${encodeURIComponent(text.trim())}&limit=20`);
+  const places = ((r && r.result) || []).filter(p => p.latitude != null);
+  if (!places.length) return null;
+  const wanted = text.trim().toLowerCase();
+  const rank = p => (p.name_1 && p.name_1.toLowerCase() === wanted ? 0 : 10) +
+                    (PLACE_RANK.includes(p.local_type) ? PLACE_RANK.indexOf(p.local_type) : PLACE_RANK.length);
+  const best = places.slice().sort((a, b) => rank(a) - rank(b))[0];
+  const area = best.county_unitary || best.district_borough || best.region;
+  const label = area && area !== best.name_1 ? `${best.name_1}, ${area}` : best.name_1;
+  return { lat: best.latitude, lon: best.longitude, label };
+}
+
+async function search(event) {
+  event.preventDefault();
+  const text = $("place").value.trim();
+  if (!text) { $("place").focus(); return; }
+  setStatus(`Looking up ${text}...`);
+  try {
+    const place = await lookUp(text);
+    if (!place) {
+      setStatus(`Couldn't find "${text}". Try a full postcode, or the name of a town.`, true);
+      return;
+    }
+    $("place").blur();
+    setOrigin(place);
+  } catch (err) {
+    setStatus("The postcode search isn't answering. Check your connection, or use your location.", true);
+  }
+}
+
+function setOrigin(origin) {
+  state.origin = origin;
+  render();
+}
+
+// ---------- Drawing the list ----------
+function signFor(s) {
+  const alsoKinds = s.also.split(", ").map(label => LABEL_TO_KIND[label]).filter(Boolean);
+  const also = alsoKinds.length
+    ? "Also good for " + alsoKinds.map(k => KIND[k].also).join(" and ") + "." : "";
+  const actions = el("div", { className: "actions" },
+    el("a", { className: "btn btn-go", href: navigateLink(s), target: "_blank", rel: "noopener" }, "Navigate"),
+    el("a", { className: "btn", href: streetViewLink(s), target: "_blank", rel: "noopener" }, "Street View"),
+    IS_IOS ? el("a", { className: "btn", href: appleLink(s), target: "_blank", rel: "noopener" }, "Apple Maps") : null);
+  const name = el("button", { className: "name-btn", type: "button", onclick: () => showOnMap(s),
+                              "aria-label": `${s.street}, show on the map` }, s.street);
+  return el("article", { className: "sign", "data-id": s.id },
+    el("div", { className: "sign-head" },
+      el("h3", { className: "sign-name" }, name),
+      s.miles == null ? null : el("p", { className: "miles", "aria-label": `${formatMiles(s.miles)} miles away`,
+                                         title: `${formatMiles(s.miles)} miles in a straight line` },
+                                  signMiles(s.miles), el("small", {}, "mi"))),
+    el("p", { className: "why" }, sentence(s.why)),
+    s.note ? el("p", { className: "note" }, s.note) : null,
+    s.nearSchool ? el("p", { className: "warn" }, "Near a school: avoid school-run times") : null,
+    also ? el("p", { className: "also" }, also) : null,
+    actions);
+}
+
+function groupTitle(kind) {
+  return el("h2", { className: "group-title" },
+    el("span", { className: "symbol", html: SYMBOLS[kind.id] }), kind.title);
+}
+
+function render() {
+  const list = $("list");
+  list.replaceChildren();
+  const o = state.origin;
+  if (!o) {
+    drawMarkers(state.spots, null);
+    return;
+  }
+  const near = state.spots.map(s => ({ ...s, miles: milesBetween(o, s) })).sort((a, b) => a.miles - b.miles);
+  const shown = [];
+  const kinds = state.kind === "all" ? KINDS : [KIND[state.kind]];
+  for (const kind of kinds) {
+    const ofKind = near.filter(s => s.kind === kind.id);
+    if (!ofKind.length) continue;
+    const close = ofKind.filter(s => s.miles <= NEAR_MILES);
+    const pool = close.length ? close : ofKind.slice(0, PER_GROUP);  // nothing close: the nearest few anyway
+    const take = pool.slice(0, state.kind === "all" ? PER_GROUP : MAX_LIST);
+    shown.push(...take);
+    const section = el("section", { className: "group" }, groupTitle(kind), ...take.map(signFor));
+    if (state.kind === "all" && pool.length > take.length) {
+      section.append(el("button", { className: "more", type: "button", onclick: () => chooseKind(kind.id) },
+                        `Show all ${pool.length} ${kind.plural}`));
+    }
+    list.append(section);
+  }
+  const where = o.label === "you" ? "you" : o.label;
+  if (!near.length) {
+    setStatus("No spots loaded yet.", true);
+  } else if (near[0].miles > FAR_MILES) {
+    setStatus(`No spots within ${FAR_MILES} miles of ${where} yet. The nearest is ${formatMiles(near[0].miles)} miles away.`, true);
+  } else {
+    setStatus(`Nearest to ${where}.`);
+  }
+  drawMarkers(shown, o);
+}
+
+function chooseKind(id) {
+  state.kind = id;
+  for (const b of $("kinds").children) b.setAttribute("aria-pressed", String(b.dataset.kind === id));
+  render();
+  if (state.origin) $("list").scrollIntoView({ behavior: REDUCED_MOTION ? "auto" : "smooth", block: "start" });
+}
+
+function buildKindButtons() {
+  for (const k of [{ id: "all", tab: "All" }, ...KINDS]) {
+    const b = el("button", { className: "kind", type: "button", "aria-pressed": String(k.id === state.kind),
+                             onclick: () => chooseKind(k.id) }, k.tab);
+    b.dataset.kind = k.id;
+    $("kinds").append(b);
+  }
+}
+
+// ---------- The map ----------
+let map = null, layer = null;
+const markers = new Map();
+
+function setUpMap() {
+  if (!window.L) { $("map").hidden = true; return; }  // the map library didn't load: the list still works
+  map = L.map("map", { zoomSnap: 0.5 });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(map);
+  layer = L.layerGroup().addTo(map);
+  map.setView([54.4, -2.6], 5);  // the whole of Great Britain, until there's something to show
+  window.addEventListener("resize", () => map.invalidateSize());
+}
+
+function popupFor(s) {
+  const kind = KIND[s.kind];
+  return el("div", {},
+    el("div", { className: "popup-name" }, s.street),
+    el("div", {}, kind.one + (s.miles == null ? "" : `, ${signMiles(s.miles)} mi`)),
+    el("div", { className: "popup-links" },
+      el("a", { href: navigateLink(s), target: "_blank", rel: "noopener" }, "Navigate"),
+      el("a", { href: streetViewLink(s), target: "_blank", rel: "noopener" }, "Street View")));
+}
+
+function drawMarkers(spots, origin) {
+  if (!map) return;
+  layer.clearLayers();
+  markers.clear();
+  const points = [];
+  if (origin) {
+    L.marker([origin.lat, origin.lon], {
+      icon: L.divIcon({ className: "", html: '<span class="me"></span>', iconSize: [26, 26] }),
+      interactive: false, keyboard: false, zIndexOffset: 1000,
+    }).addTo(layer);
+    points.push([origin.lat, origin.lon]);
+  }
+  const here = new Map();  // spots on the same street share a point: shift each extra one to the right
+  for (const s of spots) {
+    const key = `${s.lat.toFixed(5)},${s.lon.toFixed(5)}`;
+    const k = here.get(key) || 0;
+    here.set(key, k + 1);
+    const m = L.marker([s.lat, s.lon], {
+      icon: L.divIcon({ className: "spot-icon", html: SYMBOLS[s.kind], iconSize: [28, 28], iconAnchor: [14 - 24 * k, 14] }),
+      title: `${KIND[s.kind].tab}: ${s.street}`,
+    }).bindPopup(() => popupFor(s)).addTo(layer);
+    markers.set(s.id, m);
+    points.push([s.lat, s.lon]);
+  }
+  if (points.length) map.fitBounds(points, { padding: [30, 30], maxZoom: 16, animate: !REDUCED_MOTION });
+}
+
+function showOnMap(s) {
+  if (!map) return;
+  $("map").scrollIntoView({ behavior: REDUCED_MOTION ? "auto" : "smooth", block: "start" });
+  map.setView([s.lat, s.lon], 17, { animate: !REDUCED_MOTION });
+  const m = markers.get(s.id);
+  if (m) m.openPopup();
+}
+
+// ---------- Start ----------
+async function start() {
+  buildKindButtons();
+  setUpMap();
+  $("locate").addEventListener("click", locate);
+  $("search").addEventListener("submit", search);
+  const missing = await loadSpots();
+  if (!state.spots.length) {
+    setStatus(location.protocol === "file:"
+      ? "Open this page from its web address, not by double-clicking the file. The setup steps explain how."
+      : `Couldn't load the spots. Check ${SPOT_FILES.join(" and ")} are uploaded next to index.html.`, true);
+    return;
+  }
+  setStatus(missing.length
+    ? `Couldn't load ${missing.join(" and ")}, so some areas are missing. Use your location, or search for a postcode or town.`
+    : `${state.spots.length} spots loaded. Use your location, or search for a postcode or town.`, missing.length > 0);
+  render();
+  // If location was allowed before, use it straight away
+  if (navigator.permissions && navigator.permissions.query) {
+    navigator.permissions.query({ name: "geolocation" })
+      .then(p => { if (p.state === "granted" && !state.origin) locate(); })
+      .catch(() => {});
+  }
+}
+start();
+</script>
+</body>
+</html>
