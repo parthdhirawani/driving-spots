@@ -57,6 +57,9 @@
   select { width: 100%; padding: 0 10px; }
   .status { margin: 12px 0 0; min-height: 1.45em; }
   .status.problem { color: var(--red); font-weight: 700; }
+  .status-detail { display: block; margin-top: 4px; color: var(--kerb); font-weight: 400; font-size: 15px; }
+  .log { margin: 16px 0 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.4 var(--font);
+         background: var(--white); border: 2px solid var(--black); border-radius: 10px; }
 
   .btn {
     display: inline-flex; align-items: center; justify-content: center;
@@ -264,9 +267,16 @@ const TEST = {
   maxMiles: 4,         // spots and roundabouts used must be this close to the start
   perType: 6,          // the nearest spots of each type to choose between
   roundaboutPool: 12,  // roundabouts to choose between, spread out
+  fillerPool: 8,       // quiet through streets to drive along when the stops alone make too short a test
+  maxVias: 3,          // places passed through on the way (roundabouts and those streets) in one test
   roundabouts: [2, 3], // how many to route through on purpose (others come up on the way)
   tries: 400,          // random combinations tried to get the length right
+  attempts: 3,         // routes to ask for, with different spots each time, before giving up
+  waitSeconds: 20,     // stop waiting for the planner after this long
+  pace: 230,           // seconds of driving per straight-line mile, when the planner gives no time
 };
+// Add #debug to the end of the web address to see what the route planner was asked and what it said
+const DEBUG = location.hash === "#debug";
 
 // ---------- Types of spot, in the order they're shown ----------
 const KINDS = [
@@ -280,6 +290,7 @@ const KINDS = [
     plural: "emergency stop roads", also: "emergency stops" },
 ];
 const KIND = Object.fromEntries(KINDS.map(k => [k.id, k]));
+const FILLER_KINDS = ["kerbside", "hill_start", "emergency_stop"];  // streets, not car parks
 // The notebook names other good uses of a street with these labels
 const LABEL_TO_KIND = {
   "Hill start": "hill_start", "Emergency stop": "emergency_stop",
@@ -317,7 +328,7 @@ const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
 const REDUCED_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const state = {
-  spots: [], roundabouts: [], origin: null, kind: "all", mode: "spots", result: null,
+  spots: [], roundabouts: [], origin: null, originText: "", kind: "all", mode: "spots", result: null,
   test: { minutes: 40, manoeuvre: "surprise", emergency: "real", hill: true, roundabouts: true },
 };
 const $ = id => document.getElementById(id);
@@ -336,7 +347,12 @@ function el(tag, props = {}, ...children) {
 }
 const sentence = text => text ? text[0].toUpperCase() + text.slice(1).replace(/ m2\b/g, " m²") : "";
 const round6 = x => Number(x).toFixed(6);
+const coord = x => Number(Number(x).toFixed(5));  // about a metre: plenty for the route planner
 const pickOne = list => list[Math.floor(Math.random() * list.length)];
+const median = list => list.slice().sort((a, b) => a - b)[Math.floor(list.length / 2)];
+// "spots_sutton.geojson" is the Sutton area
+const areaOf = file => ((file.match(/^spots_(.+)\.geojson$/i) || [])[1] || "")
+  .replace(/[_-]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 const where = o => o.label === "you" ? "where you are" : o.label;
 const scrollTo = id => $(id).scrollIntoView({ behavior: REDUCED_MOTION ? "auto" : "smooth", block: "start" });
 
@@ -379,10 +395,24 @@ function signMiles(m) {
   return (quarters >= 4 ? String(Math.floor(quarters / 4)) : "") + ["", "¼", "½", "¾"][quarters % 4];
 }
 
-function setStatus(text, problem = false) {
+function setStatus(text, problem = false, detail = "") {
   const s = $("status");
-  s.textContent = text;
+  s.replaceChildren(text, ...(detail ? [el("span", { className: "status-detail" }, detail)] : []));
   s.classList.toggle("problem", problem);
+}
+
+// What the route planner was asked and said, shown at the bottom of the page with #debug
+const plannerLog = [];
+function logPlanner(line) {
+  plannerLog.push(`${new Date().toLocaleTimeString("en-GB")}  ${line}`);
+  console.info(`[planner] ${line}`);
+  if (!DEBUG) return;
+  let box = $("planner-log");
+  if (!box) {
+    box = el("pre", { id: "planner-log", className: "log", "aria-label": "Route planner log" });
+    document.querySelector(".foot").append(box);
+  }
+  box.textContent = plannerLog.join("\n");
 }
 
 // Links that open the phone's own apps
@@ -405,7 +435,7 @@ function toSpot(feature, i, file) {
     why: p.why || "", note: p.note || "", also: p.also || "",
     lat: Number(p.lat ?? lat), lon: Number(p.lon ?? lon),
     navLat: Number(p.nav_lat ?? p.lat ?? lat), navLon: Number(p.nav_lon ?? p.lon ?? lon),
-    heading: Number(p.heading || 0), nearSchool: Boolean(p.near_school),
+    heading: Number(p.heading || 0), nearSchool: Boolean(p.near_school), area: areaOf(file),
   };
 }
 
@@ -439,6 +469,7 @@ function locate() {
   navigator.geolocation.getCurrentPosition(
     pos => {
       button.disabled = false;
+      $("place").value = "";  // so an old postcode in the box doesn't look like the start
       setOrigin({ lat: pos.coords.latitude, lon: pos.coords.longitude, label: "you" });
     },
     err => {
@@ -493,27 +524,35 @@ async function lookUp(text) {
   return { lat: best.latitude, lon: best.longitude, label };
 }
 
-async function search(event) {
-  event.preventDefault();
-  const text = $("place").value.trim();
-  if (!text) { $("place").focus(); return; }
+// Look up a postcode or town and make it the start point. Says false if that didn't work.
+async function startFrom(text) {
   setStatus(`Looking up ${text}...`);
   try {
     const place = await lookUp(text);
     if (!place) {
       setStatus(`Couldn't find "${text}". Try a full postcode, or the name of a town.`, true);
-      return;
+      return false;
     }
     $("place").blur();
-    setOrigin(place);
+    setOrigin(place, text);
+    return true;
   } catch (err) {
     setStatus("The postcode search isn't answering. Check your connection, or use your location.", true);
+    return false;
   }
 }
 
-function setOrigin(origin) {
+async function search(event) {
+  event.preventDefault();
+  const text = $("place").value.trim();
+  if (!text) { $("place").focus(); return; }
+  await startFrom(text);
+}
+
+function setOrigin(origin, text = "") {
   state.origin = origin;
-  state.result = null;  // a mock test belongs to its start point
+  state.originText = text;  // what was searched for, so Build my test can tell if the box has changed
+  state.result = null;      // a mock test belongs to its start point
   render();
 }
 
@@ -608,43 +647,109 @@ function setMode(mode) {
 }
 
 // ---------- Mock tests ----------
+// busy: it asked us to slow down. slow: no answer in time. offline: couldn't reach it at all.
 class RouterError extends Error {
-  constructor(message, busy = false) { super(message); this.busy = busy; }
+  constructor(message, { busy = false, slow = false, offline = false } = {}) {
+    super(message);
+    Object.assign(this, { busy, slow, offline });
+  }
 }
+const stopTrying = err => !(err instanceof RouterError) || err.busy || err.slow || err.offline;
 
 let lastAsk = 0;
 async function askRouter(action, body) {
   const wait = lastAsk + 1100 - Date.now();  // at most one request a second
   if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
   lastAsk = Date.now();
-  const res = await fetch(`${ROUTER}/${action}?json=${encodeURIComponent(JSON.stringify(body))}`);
-  if (res.status === 429) throw new RouterError("busy", true);
+  const url = `${ROUTER}/${action}?json=${encodeURIComponent(JSON.stringify(body))}`;
+  const places = (body.locations || body.sources || []).length;
+  const timer = new AbortController();
+  const timeout = setTimeout(() => timer.abort(), TEST.waitSeconds * 1000);
+  let res;
+  try {
+    res = await fetch(url, { signal: timer.signal });
+  } catch (err) {
+    const slow = err.name === "AbortError";
+    logPlanner(`${action}, ${places} places: ${slow ? `no answer in ${TEST.waitSeconds} seconds` : `couldn't connect (${err.message})`}`);
+    throw new RouterError(slow ? "no answer" : err.message, { slow, offline: !slow });
+  } finally {
+    clearTimeout(timeout);
+  }
+  if ([429, 503, 504].includes(res.status)) {
+    logPlanner(`${action}, ${places} places: busy (HTTP ${res.status})`);
+    throw new RouterError("busy", { busy: true });
+  }
   const data = await res.json().catch(() => null);
-  if (!res.ok || !data || data.error) throw new RouterError((data && data.error) || `HTTP ${res.status}`);
+  if (!res.ok || !data || data.error) {
+    const said = data && data.error
+      ? `${data.error}${data.error_code ? ` (error ${data.error_code})` : ""}` : `HTTP ${res.status}`;
+    logPlanner(`${action}, ${places} places: ${said}`);
+    throw new RouterError(said);
+  }
+  logPlanner(`${action}, ${places} places: answered (request ${url.length.toLocaleString("en-GB")} characters long)`);
   return data;
 }
 
-// Driving times between every pair of places, in seconds. Kept, so "Build another" asks once, not twice.
+// Driving times between every pair of places, in seconds, from one request. Kept, so "Build another"
+// needs only the route. The planner leaves gaps where its quick check finds no way in (car park
+// entrances often), and if this request fails altogether, every time is a gap. Gaps are filled with
+// estimates, and the route request has the final say.
 const timesCache = new Map();
 async function travelTimes(points) {
-  const key = points.map(p => `${round6(p.navLat)},${round6(p.navLon)}`).join("|");
+  const key = points.map(p => `${coord(p.navLat)},${coord(p.navLon)}`).join("|");
   if (timesCache.has(key)) return timesCache.get(key);
-  const places = points.map(p => ({ lat: Number(round6(p.navLat)), lon: Number(round6(p.navLon)) }));
-  const data = await askRouter("sources_to_targets", { sources: places, targets: places, costing: "auto" });
   const n = points.length;
-  const times = Array.from({ length: n }, () => Array(n).fill(Infinity));
-  const answer = data.sources_to_targets;
-  if (Array.isArray(answer)) {
-    answer.forEach((row, i) => row.forEach((cell, j) => {
-      if (cell && cell.time != null) times[cell.from_index ?? i][cell.to_index ?? j] = cell.time;
-    }));
-  } else if (answer && answer.durations) {
-    answer.durations.forEach((row, i) => row.forEach((t, j) => { if (t != null) times[i][j] = t; }));
-  } else {
-    throw new RouterError("unexpected answer");
+  const times = Array.from({ length: n }, () => Array(n).fill(null));
+  try {
+    const places = points.map(p => ({ lat: coord(p.navLat), lon: coord(p.navLon) }));
+    const data = await askRouter("sources_to_targets", { sources: places, targets: places, costing: "auto" });
+    const answer = data.sources_to_targets;
+    const keep = (i, j, t) => { if (times[i] && j < n && Number.isFinite(t)) times[i][j] = t; };
+    if (Array.isArray(answer)) {
+      answer.forEach((row, i) => (row || []).forEach((cell, j) => {
+        if (cell) keep(cell.from_index ?? i, cell.to_index ?? j, cell.time);
+      }));
+    } else if (answer && Array.isArray(answer.durations)) {
+      answer.durations.forEach((row, i) => (row || []).forEach((t, j) => keep(i, j, t)));
+    } else {
+      logPlanner("sources_to_targets: the answer wasn't in a shape this page knows, so times are estimated");
+    }
+  } catch (err) {
+    if (err.busy || err.slow) throw err;
+    logPlanner(`sources_to_targets failed, so driving times are estimated: ${err.message}`);
   }
-  timesCache.set(key, times);
-  return times;
+  const table = fillGaps(points, times);
+  logPlanner(`driving times: ${table.known} from the planner, ${n * (n - 1) - table.known} estimated, ` +
+             `${Math.round(table.pace)} seconds a mile`);
+  if (table.known) timesCache.set(key, table);  // a failed request is asked again next time
+  return table;
+}
+
+// Estimates from the straight-line distance, at the pace of the times the planner did give
+function fillGaps(points, times) {
+  const n = points.length;
+  const at = i => ({ lat: points[i].navLat, lon: points[i].navLon });
+  const paces = [];
+  let known = 0;
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      if (i === j || times[i][j] == null) continue;
+      known += 1;
+      const miles = milesBetween(at(i), at(j));
+      if (miles >= 0.2) paces.push(times[i][j] / miles);
+    }
+  }
+  const pace = paces.length >= 5 ? Math.min(600, Math.max(100, median(paces))) : TEST.pace;
+  const guessed = times.map(row => row.map(t => t == null));
+  const seconds = times.map((row, i) => row.map((t, j) =>
+    i === j ? 0 : t ?? pace * milesBetween(at(i), at(j))));
+  return { seconds, guessed, known, pace };
+}
+
+// After a route comes back, correct the estimates by how far out they were
+function rescaled(table, factor) {
+  const f = Math.min(2, Math.max(0.5, factor));
+  return { ...table, seconds: table.seconds.map((row, i) => row.map((t, j) => table.guessed[i][j] ? t * f : t)) };
 }
 
 function spreadOut(places, n) {  // a mix of near and far, not all bunched together
@@ -690,41 +795,57 @@ function planTest() {
     notes.push("The spot files don't list roundabouts yet, so the route only takes the ones it passes. " +
                "Run notebook v9 for your areas and upload the new spot files to fix this.");
   }
+  // Quiet streets that aren't dead ends, near and far, to drive along when the stops are all close by
+  const fillers = spreadOut(state.spots.filter(s => FILLER_KINDS.includes(s.kind) && !/dead end/i.test(s.note))
+                              .map(s => ({ ...s, miles: milesBetween(o, s) })).filter(s => s.miles <= TEST.maxMiles),
+                            TEST.fillerPool);
   // Every spot that could be used, so a rebuild needs no new driving times
   const all = Object.keys(KIND).flatMap(nearest);
-  return { items, notes, roundabouts, points: all };
+  return { items, notes, roundabouts, fillers, points: all };
 }
 
-// Pick one spot for each part, some roundabouts and an order, so the test lasts about as long as asked
-function fitLength(plan, index, times) {
+// Pick one spot for each part, some roundabouts and an order, so the test lasts about as long as asked.
+// Spots in "avoid" were in a route the planner couldn't make, so others are used where there's a choice.
+function fitLength(plan, index, table, avoid = new Set()) {
   const minutesStopped = plan.items.reduce((sum, item) => sum + item.minutes, 0);
   const target = Math.max(5, state.test.minutes - minutesStopped) * 60 / TEST.slowdown;
-  const useRoundabouts = state.test.roundabouts && plan.roundabouts.length > 0;
+  const fresh = list => {
+    const left = list.filter(s => !avoid.has(s.id));
+    return left.length ? left : list;
+  };
+  const roundabouts = state.test.roundabouts ? fresh(plan.roundabouts) : [];
+  const fillers = fresh(plan.fillers);
+  const guessCost = table.known ? 90 : 0;  // prefer drives the planner has timed
   let best = null;
   for (let attempt = 0; attempt < TEST.tries; attempt++) {
-    const stops = plan.items.map(item => ({ ...item, spot: pickOne(item.options) }));
-    const k = useRoundabouts ? Math.min(plan.roundabouts.length, pickOne(TEST.roundabouts)) : 0;
-    const vias = shuffle(plan.roundabouts.slice()).slice(0, k).map(r => ({ via: true, spot: r }));
+    const stops = plan.items.map(item => ({ ...item, spot: pickOne(fresh(item.options)) }));
+    const k = roundabouts.length ? Math.min(roundabouts.length, pickOne(TEST.roundabouts)) : 0;
+    const vias = shuffle(roundabouts.slice()).slice(0, k).map(r => ({ via: true, spot: r }));
+    const room = Math.max(0, TEST.maxVias - vias.length);
+    const extra = Math.floor(Math.random() * (room + 1));  // none to fill: the fit keeps whichever works best
+    if (extra) {
+      const used = new Set(stops.map(s => s.spot.street));
+      vias.push(...shuffle(fillers.filter(s => !used.has(s.street))).slice(0, extra).map(s => ({ via: true, spot: s })));
+    }
     const streets = stops.map(s => s.spot.street);
     const repeats = (streets.length - new Set(streets).size) * 600;  // the same street twice is dull
     const parts = [...stops, ...vias];
     const at = parts.map(part => index.get(part.spot.id));
     for (const order of ordersOf(parts.length)) {
-      let seconds = 0, from = 0;
-      for (const k of order) {
-        seconds += times[from][at[k]];
-        from = at[k];
+      let seconds = 0, guesses = 0, from = 0;
+      for (const to of [...order.map(k => at[k]), 0]) {  // then back to the start
+        seconds += table.seconds[from][to];
+        if (table.guessed[from][to]) guesses += 1;
+        from = to;
       }
-      seconds += times[from][0];
-      if (!Number.isFinite(seconds)) continue;
       const firstStop = order.find(k => !parts[k].via);
       const stopFirst = parts[firstStop].type === "emergency_stop" && stops.length > 1 ? 300 : 0;
-      const score = Math.abs(seconds - target) + repeats + stopFirst;
-      if (!best || score < best.score) best = { score, order: order.map(k => parts[k]), seconds };
+      const score = Math.abs(seconds - target) + repeats + stopFirst + guessCost * guesses;
+      if (!best || score < best.score) {
+        best = { score, order: order.map(k => parts[k]), seconds, guesses, target, minutesStopped };
+      }
     }
   }
-  if (!best) throw new RouterError("These spots can't all be reached by road from here.");
-  best.minutes = Math.round(best.seconds * TEST.slowdown / 60 + minutesStopped);
   return best;
 }
 
@@ -747,24 +868,25 @@ function decodeLine(text, precision = 6) {  // the planner's compressed route sh
   return points;
 }
 
-async function routeFor(pick) {
+async function routeFor(pick, uphill = true) {
   const o = state.origin;
-  const locations = [{ lat: o.lat, lon: o.lon, type: "break" }];
+  const locations = [{ lat: coord(o.lat), lon: coord(o.lon), type: "break" }];
   for (const part of pick.order) {
-    const loc = { lat: Number(round6(part.spot.navLat)), lon: Number(round6(part.spot.navLon)),
-                  type: part.via ? "through" : "break" };
-    if (part.type === "hill_start") {  // arrive going uphill
-      loc.heading = Math.round(part.spot.heading);
+    const loc = { lat: coord(part.spot.navLat), lon: coord(part.spot.navLon), type: part.via ? "through" : "break" };
+    if (part.type === "hill_start" && uphill) {  // arrive going uphill
+      loc.heading = Math.round(part.spot.heading) % 360;
       loc.heading_tolerance = 60;
     }
     locations.push(loc);
   }
-  locations.push({ lat: o.lat, lon: o.lon, type: "break" });
+  locations.push({ lat: coord(o.lat), lon: coord(o.lon), type: "break" });
   const data = await askRouter("route", { locations, costing: "auto", units: "miles", language: "en-US" });
-  if (!data.trip || !Array.isArray(data.trip.legs) || data.trip.legs.length !== pick.order.filter(p => !p.via).length + 1) {
-    throw new RouterError("unexpected route");
+  const legs = data.trip && data.trip.legs;
+  if (!Array.isArray(legs) || legs.length !== pick.order.filter(p => !p.via).length + 1 ||
+      legs.some(leg => !leg.summary || typeof leg.shape !== "string")) {
+    throw new RouterError("the route that came back didn't match the stops");
   }
-  return data.trip.legs.map(leg => ({
+  return legs.map(leg => ({
     seconds: leg.summary.time, miles: leg.summary.length,
     line: decodeLine(leg.shape),
     words: (leg.maneuvers || []).map(m => m.instruction).filter(Boolean),
@@ -772,39 +894,91 @@ async function routeFor(pick) {
   }));
 }
 
+// Ask for the route. If the planner can't make it, try again with other spots, and on the last try
+// without asking to arrive uphill. If some driving times were estimates and the route came out well
+// off the length asked for, correct the estimates and try once more, keeping whichever is closer.
+async function routeTest(plan, index, table) {
+  const avoid = new Set();
+  let best = null, problem = null, corrected = false;
+  for (let attempt = 1; attempt <= TEST.attempts; attempt++) {
+    const pick = fitLength(plan, index, table, avoid);
+    let legs;
+    try {
+      legs = await routeFor(pick, attempt < TEST.attempts);
+    } catch (err) {
+      if (stopTrying(err)) {
+        if (best) break;
+        throw err;
+      }
+      problem = err;
+      for (const part of pick.order) avoid.add(part.spot.id);
+      continue;
+    }
+    const seconds = legs.reduce((sum, leg) => sum + leg.seconds, 0);
+    const off = Math.abs(seconds - pick.target);
+    if (!best || off < best.off) best = { pick, legs, seconds, off };
+    if (corrected || !pick.guesses || off <= 0.2 * pick.target) break;
+    logPlanner(`the route took ${Math.round(seconds)} seconds, not about ${Math.round(pick.target)}, so trying once more`);
+    table = rescaled(table, seconds / pick.seconds);
+    corrected = true;
+  }
+  if (!best) throw problem;
+  return best;
+}
+
 function routerProblem(err) {
-  if (err && err.busy) return "The free route planner is busy. Wait a minute, then tap Build my test again.";
-  if (err instanceof TypeError) return "Couldn't reach the route planner. Check your connection, then try again.";
-  return "The route planner couldn't make a test from here. Try again in a minute, or start from a different place.";
+  if (err && err.busy) return ["The free route planner is busy. Wait a minute, then tap Build my test again."];
+  if (err && err.slow) return ["The free route planner didn't answer. Wait a minute, then tap Build my test again."];
+  if (err && err.offline) return ["Couldn't reach the route planner. Check your connection, then try again."];
+  return ["The route planner couldn't make a test from here. Try again in a minute, or start from a different place.",
+          err && err.message ? `Details: ${err.message}` : ""];
+}
+
+function noSpotsNear(o) {
+  const text = `There are no practice spots within ${TEST.maxMiles} miles of ${where(o)} yet.`;
+  const nearest = state.spots.map(s => ({ s, miles: milesBetween(o, s) })).sort((a, b) => a.miles - b.miles)[0];
+  if (!nearest) return text;
+  return `${text} The nearest are ${formatMiles(nearest.miles)} miles away` +
+         (nearest.s.area ? `, around ${nearest.s.area}, so search for a postcode there.` : ".");
 }
 
 async function buildTest(event) {
   if (event) event.preventDefault();
-  if (!state.origin) {
-    setStatus("Use your location, or search for a postcode or town, to choose where the test starts.", true);
-    return;
-  }
   const button = $("build");
   button.disabled = true;
   try {
+    // A postcode or town typed in the box but not searched for: start from there
+    const typed = $("place").value.trim();
+    if (typed && typed !== state.originText && !(await startFrom(typed))) return;
+    if (!state.origin) {
+      setStatus("Use your location, or search for a postcode or town, to choose where the test starts.", true);
+      return;
+    }
     const plan = planTest();
     if (!plan.items.length) {
-      setStatus(`There are no practice spots within ${TEST.maxMiles} miles of ${where(state.origin)} yet.`, true);
+      setStatus(noSpotsNear(state.origin), true);
       return;
     }
     setStatus("Planning your test...");
+    const seen = new Set();
     const points = [{ id: "start", navLat: state.origin.lat, navLon: state.origin.lon },
-                    ...plan.points, ...plan.roundabouts];
+                    ...plan.points, ...plan.roundabouts, ...plan.fillers].filter(p => !seen.has(p.id) && seen.add(p.id));
     const index = new Map(points.map((p, i) => [p.id, i]));
-    const times = await travelTimes(points);
-    const pick = fitLength(plan, index, times);
+    const table = await travelTimes(points);
     setStatus("Working out the route...");
-    const legs = await routeFor(pick);
+    const { pick, legs, seconds } = await routeTest(plan, index, table);
+    pick.minutes = Math.round(seconds * TEST.slowdown / 60 + pick.minutesStopped);  // from the real route
+    if (pick.minutes < 0.8 * state.test.minutes) {
+      plan.notes.push(`There aren't enough practice spots${state.test.roundabouts ? " and roundabouts" : ""} within ` +
+                      `${TEST.maxMiles} miles of here to make it ${state.test.minutes} minutes long.`);
+    }
     state.result = { plan, pick, legs };
     renderTest();
     scrollTo("map");
   } catch (err) {
-    setStatus(routerProblem(err), true);
+    logPlanner(`no test: ${err && err.message}`);
+    const [text, detail = ""] = routerProblem(err);
+    setStatus(text, true, detail);
   } finally {
     button.disabled = false;
   }
