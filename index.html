@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#ECEEF0">
-<title>Practice spots</title>
+<title>Driving practice</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
@@ -18,8 +18,8 @@
     --pavement: #ECEEF0;      /* page background */
     --kerb: #4E555C;          /* quieter text */
     --red: #C8102E;           /* warning and stop signs */
-    --blue: #0B57A4;          /* parking signs */
-    --yellow: #FFD200;        /* the main button */
+    --blue: #0B57A4;          /* parking signs, and the route line */
+    --yellow: #FFD200;        /* the main button, and numbered stops */
     --font: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   * { box-sizing: border-box; }
@@ -31,25 +31,37 @@
     font: 17px/1.45 var(--font);
   }
   .page { max-width: 600px; margin: 0 auto; }
+  [hidden] { display: none !important; }
 
-  /* Top: title and the two ways to choose a start point */
+  /* Top: title, the two modes and the two ways to choose a start point */
   .top { padding: 22px 16px 6px; }
   h1 { margin: 0; font-size: 34px; line-height: 1.05; letter-spacing: -0.01em; }
-  .lede { margin: 6px 0 16px; color: var(--kerb); }
+  .lede { margin: 6px 0 14px; color: var(--kerb); }
+  .modes {
+    display: grid; grid-template-columns: 1fr 1fr; margin: 0 0 14px;
+    border: 2px solid var(--black); border-radius: 12px; overflow: hidden;
+  }
+  .mode {
+    min-height: 48px; font: inherit; font-weight: 700; color: var(--black);
+    background: var(--white); border: 0; cursor: pointer;
+  }
+  .mode + .mode { border-left: 2px solid var(--black); }
+  .mode[aria-pressed="true"] { background: var(--black); color: var(--white); }
   .find { display: grid; gap: 10px; }
   .search { display: flex; gap: 8px; }
-  .search input {
-    flex: 1; min-width: 0;
-    font: inherit; padding: 0 14px; min-height: 50px;
-    border: 2px solid var(--black); border-radius: 10px; background: var(--white); color: var(--black);
+  .search input, select {
+    font: inherit; min-height: 50px; color: var(--black);
+    border: 2px solid var(--black); border-radius: 10px; background: var(--white);
   }
+  .search input { flex: 1; min-width: 0; padding: 0 14px; }
+  select { width: 100%; padding: 0 10px; }
   .status { margin: 12px 0 0; min-height: 1.45em; }
   .status.problem { color: var(--red); font-weight: 700; }
 
   .btn {
     display: inline-flex; align-items: center; justify-content: center;
     min-height: 50px; padding: 0 18px;
-    font: inherit; font-weight: 700; color: var(--black); text-decoration: none;
+    font: inherit; font-weight: 700; color: var(--black); text-decoration: none; text-align: center;
     border: 2px solid var(--black); border-radius: 10px; background: var(--white);
     cursor: pointer;
   }
@@ -57,7 +69,7 @@
   .btn[disabled] { opacity: 0.55; cursor: progress; }
   :focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
 
-  /* Which type of spot to show */
+  /* Which type of spot to show, and the length of a mock test */
   .kinds {
     display: flex; gap: 8px; overflow-x: auto;
     padding: 10px 16px 14px; scrollbar-width: none;
@@ -71,10 +83,18 @@
   }
   .kind[aria-pressed="true"] { background: var(--black); color: var(--white); }
 
-  .map { height: 42vh; min-height: 260px; border-block: 2px solid var(--black); background: #D9DCDF; }
-  .map[hidden] { display: none; }
+  /* Mock test options */
+  .options { display: grid; gap: 12px; padding: 8px 16px 16px; }
+  .option { display: grid; grid-template-columns: 8.2em 1fr; align-items: center; gap: 10px; }
+  .option-name { font-weight: 700; }
+  .choice { display: flex; gap: 8px; }
+  .ticks { display: flex; flex-wrap: wrap; gap: 6px 22px; }
+  .tick { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; font-weight: 700; }
+  .tick input { width: 22px; height: 22px; margin: 0; accent-color: var(--black); }
 
-  /* The spots, laid out like local direction signs: name on the left, miles on the right */
+  .map { height: 42vh; min-height: 260px; border-block: 2px solid var(--black); background: #D9DCDF; }
+
+  /* Spots and stops, laid out like local direction signs: name on the left, distance on the right */
   .list { padding: 18px 16px 8px; }
   .group + .group { margin-top: 28px; }
   .group-title {
@@ -102,12 +122,33 @@
   .warn { margin: 6px 0 0; font-weight: 700; color: var(--red); }
   .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
   .actions .btn { padding: 0 10px; }
-  .actions .btn-go:nth-last-child(3) { grid-column: 1 / -1; }  /* iPhone: Navigate gets its own row */
+  .actions .btn-go:nth-last-child(3) { grid-column: 1 / -1; }  /* iPhone: the main button gets its own row */
   .more {
     margin-top: 12px; padding: 6px 0; min-height: 44px;
     font: inherit; font-weight: 700; color: var(--blue);
     background: none; border: 0; text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
   }
+
+  /* A mock test: the summary, then numbered stops in order */
+  .summary-title { margin: 0; font-size: 25px; line-height: 1.15; }
+  .summary-time { margin: 6px 0 0; font-size: 21px; font-weight: 700; }
+  .stop-head { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; }
+  .badge, .num {
+    display: inline-grid; place-items: center;
+    background: var(--yellow); border: 2px solid var(--black); color: var(--black); font-weight: 700;
+  }
+  .badge { width: 36px; height: 36px; border-radius: 8px; font-size: 20px; }
+  .stop-name { margin: 0; font-size: 22px; line-height: 1.15; }
+  .leg-time { margin: 0; font-weight: 700; white-space: nowrap; }
+  .stop-kind { margin: 10px 0 0; font-weight: 700; }
+  .words { margin-top: 10px; }
+  .words summary {
+    display: flex; align-items: center; min-height: 44px;
+    font-weight: 700; color: var(--blue); cursor: pointer;
+  }
+  .words ol { margin: 4px 0 0; padding-left: 1.5em; }
+  .words li + li { margin-top: 4px; }
+  .rebuild { display: grid; margin-top: 16px; }
 
   .foot { padding: 8px 16px 44px; color: var(--kerb); font-size: 15px; }
   .foot p { margin: 0 0 10px; max-width: 62ch; }
@@ -115,6 +156,8 @@
 
   /* Map markers and popups */
   .spot-icon svg { width: 28px; height: 28px; filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff); }
+  .num { width: 30px; height: 30px; border-radius: 7px; font: 700 17px/1 var(--font); }
+  .via { display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--white); border: 4px solid var(--black); }
   .me {
     display: block; width: 20px; height: 20px; border-radius: 50%;
     background: var(--blue); border: 3px solid var(--white);
@@ -134,8 +177,12 @@
 <body>
 <div class="page">
   <header class="top">
-    <h1>Practice spots</h1>
-    <p class="lede">Quiet streets and car parks to practise in, nearest first.</p>
+    <h1>Driving practice</h1>
+    <p class="lede">Quiet streets and car parks to practise in, and mock tests that start wherever you are.</p>
+    <div class="modes" role="group" aria-label="What to show">
+      <button class="mode" type="button" data-mode="spots" aria-pressed="true">Practice spots</button>
+      <button class="mode" type="button" data-mode="test" aria-pressed="false">Mock test</button>
+    </div>
     <div class="find">
       <button id="locate" class="btn btn-go" type="button">Use my location</button>
       <form id="search" class="search" role="search">
@@ -148,17 +195,52 @@
     <p id="status" class="status" role="status" aria-live="polite">Loading spots...</p>
   </header>
   <div id="kinds" class="kinds" role="group" aria-label="Type of spot"></div>
+  <form id="test-options" class="options" aria-label="Mock test options" hidden>
+    <div class="option">
+      <span class="option-name" id="length-name">Length</span>
+      <div class="choice" role="group" aria-labelledby="length-name">
+        <button class="kind" type="button" data-minutes="30" aria-pressed="false">30 min</button>
+        <button class="kind" type="button" data-minutes="40" aria-pressed="true">40 min</button>
+      </div>
+    </div>
+    <label class="option">
+      <span class="option-name">Manoeuvre</span>
+      <select id="manoeuvre">
+        <option value="surprise">Surprise me</option>
+        <option value="parallel_park">Parallel park</option>
+        <option value="bay_reverse">Reverse bay park</option>
+        <option value="bay_forward">Forward bay park</option>
+        <option value="pull_up_right">Pull up on the right</option>
+      </select>
+    </label>
+    <label class="option">
+      <span class="option-name">Emergency stop</span>
+      <select id="emergency">
+        <option value="real">1 in 7, like the real test</option>
+        <option value="always">Always</option>
+        <option value="never">Never</option>
+      </select>
+    </label>
+    <div class="ticks">
+      <label class="tick"><input id="hill" type="checkbox" checked> Hill start</label>
+      <label class="tick"><input id="roundabouts" type="checkbox" checked> Roundabouts</label>
+    </div>
+    <button id="build" class="btn btn-go" type="submit">Build my test</button>
+  </form>
 </div>
-<div id="map" class="map" role="region" aria-label="Map of practice spots"></div>
+<div id="map" class="map" role="region" aria-label="Map"></div>
 <div class="page">
   <main id="list" class="list"></main>
   <footer class="foot">
     <p>Check a spot in Street View before you go. Set your route before you drive: using a hand-held
        phone at the wheel is illegal, and so is using one while you supervise a learner.</p>
-    <p>Distances are in a straight line. Spots are picked from OpenStreetMap data, so treat them as
-       suggestions.</p>
+    <p>Mock tests are practice routes made up from the spots here, not real test routes. Driving times
+       are estimates. Distances in the spot list are in a straight line, and spots are picked from
+       OpenStreetMap data, so treat them as suggestions.</p>
     <p>Map &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors.
-       Postcode and town search by <a href="https://postcodes.io">postcodes.io</a>.</p>
+       Postcode and town search by <a href="https://postcodes.io">postcodes.io</a>. Routes by
+       <a href="https://github.com/valhalla/valhalla">Valhalla</a>, on a free server run by
+       <a href="https://www.fossgis.de">FOSSGIS</a>.</p>
   </footer>
 </div>
 
@@ -174,6 +256,17 @@ const PER_GROUP = 3;     // spots of each type shown under "All"
 const MAX_LIST = 40;     // most spots shown for one type
 const NEAR_MILES = 15;   // lists stop at this distance (unless nothing is closer)
 const FAR_MILES = 5;     // if the nearest spot is further than this, say the area isn't covered yet
+
+// Mock tests. The route planner is free and run by volunteers, so ask it at most once a second.
+const ROUTER = "https://valhalla1.openstreetmap.de";
+const TEST = {
+  slowdown: 1.25,      // a learner in real traffic takes about this much longer than the planner's estimate
+  maxMiles: 4,         // spots and roundabouts used must be this close to the start
+  perType: 6,          // the nearest spots of each type to choose between
+  roundaboutPool: 12,  // roundabouts to choose between, spread out
+  roundabouts: [2, 3], // how many to route through on purpose (others come up on the way)
+  tries: 400,          // random combinations tried to get the length right
+};
 
 // ---------- Types of spot, in the order they're shown ----------
 const KINDS = [
@@ -193,6 +286,24 @@ const LABEL_TO_KIND = {
   "Parallel park / pull up on the right": "kerbside", "Bay parking": "bay_park",
 };
 
+// What a mock test can ask for, how long each takes, and what to do
+const MANOEUVRES = {
+  parallel_park: { kind: "kerbside", name: "Parallel park", minutes: 4,
+    text: s => `Pull up alongside a parked car on ${s.street}, then reverse in behind it, finishing within about 2 car lengths.` },
+  pull_up_right: { kind: "kerbside", name: "Pull up on the right", minutes: 3,
+    text: s => `Pull up on the right-hand side of ${s.street}, reverse about 2 car lengths, then rejoin the traffic.` },
+  bay_reverse: { kind: "bay_park", name: "Reverse bay park", minutes: 4,
+    text: s => `In ${s.street}, reverse into a bay, then drive out.` },
+  bay_forward: { kind: "bay_park", name: "Forward bay park", minutes: 4,
+    text: s => `In ${s.street}, drive into a bay, then reverse out.` },
+};
+const EXTRAS = {
+  hill_start: { kind: "hill_start", name: "Hill start", minutes: 1.5,
+    text: s => `On ${s.street}, pull up on the left while heading uphill, then move off again.` },
+  emergency_stop: { kind: "emergency_stop", name: "Emergency stop", minutes: 2,
+    text: s => `Pull up on the left on ${s.street}. When you drive on, your supervisor checks it's clear behind, then says "Stop". Stop as quickly as you safely can.` },
+};
+
 // Road-sign shapes, so the types can be told apart without relying on colour
 const SYMBOLS = {
   hill_start: '<svg viewBox="0 0 28 28" aria-hidden="true"><path d="M14 2.5 26 25H2z" fill="#fff" stroke="#C8102E" stroke-width="3" stroke-linejoin="round"/><path d="M7.5 21.5h11v-6.5z"/></svg>',
@@ -205,7 +316,10 @@ const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
                (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const REDUCED_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-const state = { spots: [], origin: null, kind: "all" };
+const state = {
+  spots: [], roundabouts: [], origin: null, kind: "all", mode: "spots", result: null,
+  test: { minutes: 40, manoeuvre: "surprise", emergency: "real", hill: true, roundabouts: true },
+};
 const $ = id => document.getElementById(id);
 
 // ---------- Small helpers ----------
@@ -222,6 +336,30 @@ function el(tag, props = {}, ...children) {
 }
 const sentence = text => text ? text[0].toUpperCase() + text.slice(1).replace(/ m2\b/g, " m²") : "";
 const round6 = x => Number(x).toFixed(6);
+const pickOne = list => list[Math.floor(Math.random() * list.length)];
+const where = o => o.label === "you" ? "where you are" : o.label;
+const scrollTo = id => $(id).scrollIntoView({ behavior: REDUCED_MOTION ? "auto" : "smooth", block: "start" });
+
+function shuffle(list) {
+  for (let i = list.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [list[i], list[j]] = [list[j], list[i]];
+  }
+  return list;
+}
+
+const orderCache = new Map();
+function ordersOf(n) {  // every order of n items, as lists of positions, worked out once
+  if (!orderCache.has(n)) orderCache.set(n, [...orders([...Array(n).keys()])]);
+  return orderCache.get(n);
+}
+function* orders(items) {  // every order of a few items
+  if (items.length <= 1) { yield items.slice(); return; }
+  for (let i = 0; i < items.length; i++) {
+    const rest = items.slice(0, i).concat(items.slice(i + 1));
+    for (const tail of orders(rest)) yield [items[i], ...tail];
+  }
+}
 
 function milesBetween(a, b) {
   const R = 3958.8;  // Earth's radius in miles
@@ -238,7 +376,7 @@ function formatMiles(m) {
 function signMiles(m) {
   if (m >= 2.875) return Math.round(m).toLocaleString("en-GB");
   const quarters = Math.max(1, Math.round(m * 4));
-  return (quarters >= 4 ? String(Math.floor(quarters / 4)) : "") + ["", "\u00BC", "\u00BD", "\u00BE"][quarters % 4];
+  return (quarters >= 4 ? String(Math.floor(quarters / 4)) : "") + ["", "¼", "½", "¾"][quarters % 4];
 }
 
 function setStatus(text, problem = false) {
@@ -251,6 +389,12 @@ function setStatus(text, problem = false) {
 const navigateLink = s => `https://www.google.com/maps/dir/?api=1&destination=${round6(s.navLat)},${round6(s.navLon)}&travelmode=driving`;
 const appleLink = s => `https://maps.apple.com/?daddr=${round6(s.navLat)},${round6(s.navLon)}&dirflg=d`;
 const streetViewLink = s => `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${round6(s.lat)},${round6(s.lon)}&heading=${Math.round(s.heading || 0)}`;
+// Google Maps on a phone takes at most 3 places to pass through on the way
+function legLink(dest, vias) {
+  const through = vias.slice(0, 3).map(v => `${round6(v.navLat)},${round6(v.navLon)}`).join("%7C");
+  return `https://www.google.com/maps/dir/?api=1&destination=${round6(dest.navLat)},${round6(dest.navLon)}` +
+         (through ? `&waypoints=${through}` : "") + "&travelmode=driving&dir_action=navigate";
+}
 
 // ---------- Loading the spots ----------
 function toSpot(feature, i, file) {
@@ -270,10 +414,16 @@ async function loadSpots() {
     const res = await fetch(file, { cache: "no-cache" });
     if (!res.ok) throw new Error(`${file}: ${res.status}`);
     const data = await res.json();
-    return (data.features || []).map((f, i) => toSpot(f, i, file)).filter(s => KIND[s.kind]);
+    return (data.features || []).map((f, i) => toSpot(f, i, file));
   }));
   const missing = [];
-  results.forEach((r, i) => r.status === "fulfilled" ? state.spots.push(...r.value) : missing.push(SPOT_FILES[i]));
+  results.forEach((r, i) => {
+    if (r.status !== "fulfilled") { missing.push(SPOT_FILES[i]); return; }
+    for (const s of r.value) {
+      if (s.kind === "roundabout") state.roundabouts.push(s);
+      else if (KIND[s.kind]) state.spots.push(s);
+    }
+  });
   return missing;
 }
 
@@ -363,10 +513,11 @@ async function search(event) {
 
 function setOrigin(origin) {
   state.origin = origin;
+  state.result = null;  // a mock test belongs to its start point
   render();
 }
 
-// ---------- Drawing the list ----------
+// ---------- The spot list ----------
 function signFor(s) {
   const alsoKinds = s.also.split(", ").map(label => LABEL_TO_KIND[label]).filter(Boolean);
   const also = alsoKinds.length
@@ -396,6 +547,7 @@ function groupTitle(kind) {
 }
 
 function render() {
+  if (state.mode === "test") { renderTest(); return; }
   const list = $("list");
   list.replaceChildren();
   const o = state.origin;
@@ -420,13 +572,13 @@ function render() {
     }
     list.append(section);
   }
-  const where = o.label === "you" ? "you" : o.label;
+  const whom = o.label === "you" ? "you" : o.label;
   if (!near.length) {
     setStatus("No spots loaded yet.", true);
   } else if (near[0].miles > FAR_MILES) {
-    setStatus(`No spots within ${FAR_MILES} miles of ${where} yet. The nearest is ${formatMiles(near[0].miles)} miles away.`, true);
+    setStatus(`No spots within ${FAR_MILES} miles of ${whom} yet. The nearest is ${formatMiles(near[0].miles)} miles away.`, true);
   } else {
-    setStatus(`Nearest to ${where}.`);
+    setStatus(`Nearest to ${whom}.`);
   }
   drawMarkers(shown, o);
 }
@@ -435,7 +587,7 @@ function chooseKind(id) {
   state.kind = id;
   for (const b of $("kinds").children) b.setAttribute("aria-pressed", String(b.dataset.kind === id));
   render();
-  if (state.origin) $("list").scrollIntoView({ behavior: REDUCED_MOTION ? "auto" : "smooth", block: "start" });
+  if (state.origin) scrollTo("list");
 }
 
 function buildKindButtons() {
@@ -447,12 +599,308 @@ function buildKindButtons() {
   }
 }
 
+function setMode(mode) {
+  state.mode = mode;
+  for (const b of document.querySelectorAll(".mode")) b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
+  $("kinds").hidden = mode !== "spots";
+  $("test-options").hidden = mode !== "test";
+  render();
+}
+
+// ---------- Mock tests ----------
+class RouterError extends Error {
+  constructor(message, busy = false) { super(message); this.busy = busy; }
+}
+
+let lastAsk = 0;
+async function askRouter(action, body) {
+  const wait = lastAsk + 1100 - Date.now();  // at most one request a second
+  if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+  lastAsk = Date.now();
+  const res = await fetch(`${ROUTER}/${action}?json=${encodeURIComponent(JSON.stringify(body))}`);
+  if (res.status === 429) throw new RouterError("busy", true);
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || data.error) throw new RouterError((data && data.error) || `HTTP ${res.status}`);
+  return data;
+}
+
+// Driving times between every pair of places, in seconds. Kept, so "Build another" asks once, not twice.
+const timesCache = new Map();
+async function travelTimes(points) {
+  const key = points.map(p => `${round6(p.navLat)},${round6(p.navLon)}`).join("|");
+  if (timesCache.has(key)) return timesCache.get(key);
+  const places = points.map(p => ({ lat: Number(round6(p.navLat)), lon: Number(round6(p.navLon)) }));
+  const data = await askRouter("sources_to_targets", { sources: places, targets: places, costing: "auto" });
+  const n = points.length;
+  const times = Array.from({ length: n }, () => Array(n).fill(Infinity));
+  const answer = data.sources_to_targets;
+  if (Array.isArray(answer)) {
+    answer.forEach((row, i) => row.forEach((cell, j) => {
+      if (cell && cell.time != null) times[cell.from_index ?? i][cell.to_index ?? j] = cell.time;
+    }));
+  } else if (answer && answer.durations) {
+    answer.durations.forEach((row, i) => row.forEach((t, j) => { if (t != null) times[i][j] = t; }));
+  } else {
+    throw new RouterError("unexpected answer");
+  }
+  timesCache.set(key, times);
+  return times;
+}
+
+function spreadOut(places, n) {  // a mix of near and far, not all bunched together
+  const left = places.slice().sort((a, b) => a.miles - b.miles);
+  const chosen = left.length ? [left.shift()] : [];
+  while (chosen.length < n && left.length) {
+    let best = 0, bestGap = -1;
+    left.forEach((p, i) => {
+      const gap = Math.min(...chosen.map(c => milesBetween(c, p)));
+      if (gap > bestGap) { bestGap = gap; best = i; }
+    });
+    chosen.push(left.splice(best, 1)[0]);
+  }
+  return chosen;
+}
+
+// What this test will include, and the nearest few spots for each part of it
+function planTest() {
+  const o = state.origin, t = state.test, notes = [], items = [];
+  const nearest = kind => state.spots.filter(s => s.kind === kind)
+    .map(s => ({ ...s, miles: milesBetween(o, s) })).filter(s => s.miles <= TEST.maxMiles)
+    .sort((a, b) => a.miles - b.miles).slice(0, TEST.perType);
+  const wanted = t.manoeuvre === "surprise" ? Object.keys(MANOEUVRES) : [t.manoeuvre];
+  const possible = wanted.filter(type => nearest(MANOEUVRES[type].kind).length);
+  if (possible.length) {
+    const type = pickOne(possible);
+    items.push({ type, ...MANOEUVRES[type], options: nearest(MANOEUVRES[type].kind) });
+  } else {
+    notes.push(`There are no ${t.manoeuvre === "surprise" ? "manoeuvre" : MANOEUVRES[t.manoeuvre].name.toLowerCase()} ` +
+               `spots within ${TEST.maxMiles} miles, so this test has no manoeuvre.`);
+  }
+  const add = type => {
+    const options = nearest(EXTRAS[type].kind);
+    if (options.length) items.push({ type, ...EXTRAS[type], options });
+    else notes.push(`There are no ${KIND[EXTRAS[type].kind].plural} within ${TEST.maxMiles} miles, so it's left out.`);
+  };
+  if (t.hill) add("hill_start");
+  if (t.emergency === "always" || (t.emergency === "real" && Math.random() < 1 / 7)) add("emergency_stop");
+  else if (t.emergency === "real") notes.push("No emergency stop this time. Like the real test, it comes up about 1 time in 7.");
+  const roundabouts = spreadOut(state.roundabouts.map(r => ({ ...r, miles: milesBetween(o, r) }))
+                                .filter(r => r.miles <= TEST.maxMiles), TEST.roundaboutPool);
+  if (t.roundabouts && !state.roundabouts.length) {
+    notes.push("The spot files don't list roundabouts yet, so the route only takes the ones it passes. " +
+               "Run notebook v9 for your areas and upload the new spot files to fix this.");
+  }
+  // Every spot that could be used, so a rebuild needs no new driving times
+  const all = Object.keys(KIND).flatMap(nearest);
+  return { items, notes, roundabouts, points: all };
+}
+
+// Pick one spot for each part, some roundabouts and an order, so the test lasts about as long as asked
+function fitLength(plan, index, times) {
+  const minutesStopped = plan.items.reduce((sum, item) => sum + item.minutes, 0);
+  const target = Math.max(5, state.test.minutes - minutesStopped) * 60 / TEST.slowdown;
+  const useRoundabouts = state.test.roundabouts && plan.roundabouts.length > 0;
+  let best = null;
+  for (let attempt = 0; attempt < TEST.tries; attempt++) {
+    const stops = plan.items.map(item => ({ ...item, spot: pickOne(item.options) }));
+    const k = useRoundabouts ? Math.min(plan.roundabouts.length, pickOne(TEST.roundabouts)) : 0;
+    const vias = shuffle(plan.roundabouts.slice()).slice(0, k).map(r => ({ via: true, spot: r }));
+    const streets = stops.map(s => s.spot.street);
+    const repeats = (streets.length - new Set(streets).size) * 600;  // the same street twice is dull
+    const parts = [...stops, ...vias];
+    const at = parts.map(part => index.get(part.spot.id));
+    for (const order of ordersOf(parts.length)) {
+      let seconds = 0, from = 0;
+      for (const k of order) {
+        seconds += times[from][at[k]];
+        from = at[k];
+      }
+      seconds += times[from][0];
+      if (!Number.isFinite(seconds)) continue;
+      const firstStop = order.find(k => !parts[k].via);
+      const stopFirst = parts[firstStop].type === "emergency_stop" && stops.length > 1 ? 300 : 0;
+      const score = Math.abs(seconds - target) + repeats + stopFirst;
+      if (!best || score < best.score) best = { score, order: order.map(k => parts[k]), seconds };
+    }
+  }
+  if (!best) throw new RouterError("These spots can't all be reached by road from here.");
+  best.minutes = Math.round(best.seconds * TEST.slowdown / 60 + minutesStopped);
+  return best;
+}
+
+function decodeLine(text, precision = 6) {  // the planner's compressed route shape
+  const factor = 10 ** precision, points = [];
+  let index = 0, lat = 0, lon = 0;
+  while (index < text.length) {
+    for (const which of [0, 1]) {
+      let result = 0, shift = 0, byte;
+      do {
+        byte = text.charCodeAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20);
+      const delta = (result & 1) ? ~(result >> 1) : (result >> 1);
+      if (which === 0) lat += delta; else lon += delta;
+    }
+    points.push([lat / factor, lon / factor]);
+  }
+  return points;
+}
+
+async function routeFor(pick) {
+  const o = state.origin;
+  const locations = [{ lat: o.lat, lon: o.lon, type: "break" }];
+  for (const part of pick.order) {
+    const loc = { lat: Number(round6(part.spot.navLat)), lon: Number(round6(part.spot.navLon)),
+                  type: part.via ? "through" : "break" };
+    if (part.type === "hill_start") {  // arrive going uphill
+      loc.heading = Math.round(part.spot.heading);
+      loc.heading_tolerance = 60;
+    }
+    locations.push(loc);
+  }
+  locations.push({ lat: o.lat, lon: o.lon, type: "break" });
+  const data = await askRouter("route", { locations, costing: "auto", units: "miles", language: "en-US" });
+  if (!data.trip || !Array.isArray(data.trip.legs) || data.trip.legs.length !== pick.order.filter(p => !p.via).length + 1) {
+    throw new RouterError("unexpected route");
+  }
+  return data.trip.legs.map(leg => ({
+    seconds: leg.summary.time, miles: leg.summary.length,
+    line: decodeLine(leg.shape),
+    words: (leg.maneuvers || []).map(m => m.instruction).filter(Boolean),
+    roundabouts: (leg.maneuvers || []).filter(m => m.type === 26).length,  // 26 = entering a roundabout
+  }));
+}
+
+function routerProblem(err) {
+  if (err && err.busy) return "The free route planner is busy. Wait a minute, then tap Build my test again.";
+  if (err instanceof TypeError) return "Couldn't reach the route planner. Check your connection, then try again.";
+  return "The route planner couldn't make a test from here. Try again in a minute, or start from a different place.";
+}
+
+async function buildTest(event) {
+  if (event) event.preventDefault();
+  if (!state.origin) {
+    setStatus("Use your location, or search for a postcode or town, to choose where the test starts.", true);
+    return;
+  }
+  const button = $("build");
+  button.disabled = true;
+  try {
+    const plan = planTest();
+    if (!plan.items.length) {
+      setStatus(`There are no practice spots within ${TEST.maxMiles} miles of ${where(state.origin)} yet.`, true);
+      return;
+    }
+    setStatus("Planning your test...");
+    const points = [{ id: "start", navLat: state.origin.lat, navLon: state.origin.lon },
+                    ...plan.points, ...plan.roundabouts];
+    const index = new Map(points.map((p, i) => [p.id, i]));
+    const times = await travelTimes(points);
+    const pick = fitLength(plan, index, times);
+    setStatus("Working out the route...");
+    const legs = await routeFor(pick);
+    state.result = { plan, pick, legs };
+    renderTest();
+    scrollTo("map");
+  } catch (err) {
+    setStatus(routerProblem(err), true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function stopCard(number, title, kindLine, text, leg, dest, vias, extra = []) {
+  const actions = el("div", { className: "actions" },
+    el("a", { className: "btn btn-go", href: legLink(dest, vias), target: "_blank", rel: "noopener" }, "Drive there"),
+    dest.street ? el("a", { className: "btn", href: streetViewLink(dest), target: "_blank", rel: "noopener" }, "Street View") : null,
+    IS_IOS ? el("a", { className: "btn", href: appleLink(dest), target: "_blank", rel: "noopener" }, "Apple Maps") : null);
+  const minutes = Math.max(1, Math.round(leg.seconds * TEST.slowdown / 60));
+  return el("article", { className: "sign stop" },
+    el("div", { className: "stop-head" },
+      el("span", { className: "badge", "aria-hidden": "true" }, number),
+      el("h3", { className: "stop-name" }, el("span", { className: "visually-hidden" }, `Stop ${number}: `), title),
+      el("p", { className: "leg-time", "aria-label": `about ${minutes} minutes' drive` }, `${minutes} min`)),
+    kindLine ? el("p", { className: "stop-kind" }, kindLine) : null,
+    text ? el("p", { className: "why" }, text) : null,
+    ...extra,
+    leg.roundabouts ? el("p", { className: "note" },
+      `On the way: ${leg.roundabouts} roundabout${leg.roundabouts === 1 ? "" : "s"}.`) : null,
+    actions,
+    el("details", { className: "words" },
+      el("summary", {}, "Directions in words"),
+      el("ol", {}, ...leg.words.map(w => el("li", {}, w)))));
+}
+
+function renderTest() {
+  const list = $("list");
+  list.replaceChildren();
+  const o = state.origin, r = state.result;
+  if (!r) {
+    drawMarkers([], o);
+    setStatus(o ? `The test will start from ${where(o)}. Choose your options, then tap Build my test.`
+                : "Use your location, or search for a postcode or town, to choose where the test starts.");
+    return;
+  }
+  const stops = r.pick.order.filter(part => !part.via);
+  const miles = r.legs.reduce((sum, leg) => sum + leg.miles, 0);
+  const roundabouts = r.legs.reduce((sum, leg) => sum + leg.roundabouts, 0);
+  const parts = stops.map(s => s.name.toLowerCase());
+  if (roundabouts) parts.push(`${roundabouts} roundabout${roundabouts === 1 ? "" : "s"}`);
+  const includes = parts.length ? sentence(parts.length > 1
+    ? parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1] : parts[0]) + "." : "";
+  list.append(el("section", { className: "group" },
+    el("article", { className: "sign summary" },
+      el("h2", { className: "summary-title" }, "Your mock test"),
+      el("p", { className: "summary-time" }, `About ${r.pick.minutes} minutes, ${miles.toFixed(1)} miles`),
+      includes ? el("p", { className: "why" }, includes) : null,
+      ...r.plan.notes.map(n => el("p", { className: "note" }, n)))));
+
+  // Roundabouts to pass through on each leg, for the Google Maps links
+  const legVias = [[]];
+  for (const part of r.pick.order) {
+    if (part.via) legVias[legVias.length - 1].push(part.spot);
+    else legVias.push([]);
+  }
+  const section = el("section", { className: "group" });
+  stops.forEach((stop, i) => {
+    const s = stop.spot;
+    section.append(stopCard(i + 1, s.street, stop.name, stop.text(s), r.legs[i], s, legVias[i], [
+      s.note ? el("p", { className: "note" }, s.note) : null,
+      s.nearSchool ? el("p", { className: "warn" }, "Near a school: avoid school-run times") : null,
+    ]));
+  });
+  const home = { navLat: o.lat, navLon: o.lon };
+  section.append(stopCard(stops.length + 1, "Back to the start", "", "", r.legs[stops.length], home,
+                          legVias[stops.length]));
+  section.append(el("div", { className: "rebuild" },
+    el("button", { className: "btn", type: "button", onclick: () => buildTest() }, "Build another")));
+  list.append(section);
+  setStatus(`Your mock test is ready: about ${r.pick.minutes} minutes from ${where(o)}.`);
+  drawTest(r);
+}
+
+function setUpTestOptions() {
+  const form = $("test-options");
+  for (const b of form.querySelectorAll("[data-minutes]")) {
+    b.addEventListener("click", () => {
+      state.test.minutes = Number(b.dataset.minutes);
+      for (const other of form.querySelectorAll("[data-minutes]")) other.setAttribute("aria-pressed", String(other === b));
+    });
+  }
+  $("manoeuvre").addEventListener("change", e => { state.test.manoeuvre = e.target.value; });
+  $("emergency").addEventListener("change", e => { state.test.emergency = e.target.value; });
+  $("hill").addEventListener("change", e => { state.test.hill = e.target.checked; });
+  $("roundabouts").addEventListener("change", e => { state.test.roundabouts = e.target.checked; });
+  form.addEventListener("submit", buildTest);
+}
+
 // ---------- The map ----------
 let map = null, layer = null;
 const markers = new Map();
 
 function setUpMap() {
-  if (!window.L) { $("map").hidden = true; return; }  // the map library didn't load: the list still works
+  if (!window.L) { $("map").hidden = true; return; }  // the map library didn't load: the lists still work
   map = L.map("map", { zoomSnap: 0.5 });
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
@@ -473,18 +921,24 @@ function popupFor(s) {
       el("a", { href: streetViewLink(s), target: "_blank", rel: "noopener" }, "Street View")));
 }
 
+function addStart(origin, points) {
+  L.marker([origin.lat, origin.lon], {
+    icon: L.divIcon({ className: "", html: '<span class="me"></span>', iconSize: [26, 26] }),
+    interactive: false, keyboard: false, zIndexOffset: 1000,
+  }).addTo(layer);
+  points.push([origin.lat, origin.lon]);
+}
+
+function fit(points) {
+  if (points.length) map.fitBounds(points, { padding: [30, 30], maxZoom: 16, animate: !REDUCED_MOTION });
+}
+
 function drawMarkers(spots, origin) {
   if (!map) return;
   layer.clearLayers();
   markers.clear();
   const points = [];
-  if (origin) {
-    L.marker([origin.lat, origin.lon], {
-      icon: L.divIcon({ className: "", html: '<span class="me"></span>', iconSize: [26, 26] }),
-      interactive: false, keyboard: false, zIndexOffset: 1000,
-    }).addTo(layer);
-    points.push([origin.lat, origin.lon]);
-  }
+  if (origin) addStart(origin, points);
   const here = new Map();  // spots on the same street share a point: shift each extra one to the right
   for (const s of spots) {
     const key = `${s.lat.toFixed(5)},${s.lon.toFixed(5)}`;
@@ -497,12 +951,42 @@ function drawMarkers(spots, origin) {
     markers.set(s.id, m);
     points.push([s.lat, s.lon]);
   }
-  if (points.length) map.fitBounds(points, { padding: [30, 30], maxZoom: 16, animate: !REDUCED_MOTION });
+  fit(points);
+}
+
+function drawTest(r) {
+  if (!map) return;
+  layer.clearLayers();
+  markers.clear();
+  const points = [];
+  for (const leg of r.legs) {
+    L.polyline(leg.line, { color: "#FFFFFF", weight: 10, opacity: 0.9, interactive: false }).addTo(layer);
+    L.polyline(leg.line, { color: "#0B57A4", weight: 5, interactive: false }).addTo(layer);
+    points.push(...leg.line);
+  }
+  addStart(state.origin, points);
+  let number = 0;
+  for (const part of r.pick.order) {
+    const s = part.spot;
+    if (part.via) {
+      L.marker([s.navLat, s.navLon], {
+        icon: L.divIcon({ className: "", html: '<span class="via"></span>', iconSize: [16, 16] }),
+        title: s.street, keyboard: false,
+      }).addTo(layer);
+    } else {
+      number += 1;
+      L.marker([s.navLat, s.navLon], {
+        icon: L.divIcon({ className: "", html: `<span class="num">${number}</span>`, iconSize: [30, 30] }),
+        title: `Stop ${number}: ${part.name}, ${s.street}`, zIndexOffset: 500,
+      }).addTo(layer);
+    }
+  }
+  fit(points);
 }
 
 function showOnMap(s) {
   if (!map) return;
-  $("map").scrollIntoView({ behavior: REDUCED_MOTION ? "auto" : "smooth", block: "start" });
+  scrollTo("map");
   map.setView([s.lat, s.lon], 17, { animate: !REDUCED_MOTION });
   const m = markers.get(s.id);
   if (m) m.openPopup();
@@ -511,7 +995,9 @@ function showOnMap(s) {
 // ---------- Start ----------
 async function start() {
   buildKindButtons();
+  setUpTestOptions();
   setUpMap();
+  for (const b of document.querySelectorAll(".mode")) b.addEventListener("click", () => setMode(b.dataset.mode));
   $("locate").addEventListener("click", locate);
   $("search").addEventListener("submit", search);
   const missing = await loadSpots();
