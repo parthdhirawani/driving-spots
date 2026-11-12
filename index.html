@@ -269,11 +269,16 @@ const TEST = {
   roundaboutPool: 12,  // roundabouts to choose between, spread out
   fillerPool: 8,       // quiet through streets to drive along when the stops alone make too short a test
   maxVias: 3,          // places passed through on the way (roundabouts and those streets) in one test
-  roundabouts: [2, 3], // how many to route through on purpose (others come up on the way)
+  roundabouts: [1, 2, 3], // how many to route through on purpose (others come up on the way)
   tries: 400,          // random combinations tried to get the length right
-  attempts: 3,         // routes to ask for, with different spots each time, before giving up
+  attempts: 3,         // routes to ask for in one go, to get the length right or get past a refusal
+  tolerance: 0.12,     // a test this close to the length asked for is good enough
   waitSeconds: 20,     // stop waiting for the planner after this long
-  pace: 230,           // seconds of driving per straight-line mile, when the planner gives no time
+  matrixPlaces: 10,    // the free planner gives at most 100 drive times a request: 10 places to 10
+  overhead: 30,        // estimated drive: this many seconds, plus
+  pace: 340,           // this many seconds per straight-line mile (Sutton's pace), until the planner says
+  viaExtra: 45,        // passing through a place in one direction can mean going round a block
+  uphillExtra: 45,     // so can arriving at a hill start uphill
 };
 // Add #debug to the end of the web address to see what the route planner was asked and what it said
 const DEBUG = location.hash === "#debug";
@@ -690,66 +695,103 @@ async function askRouter(action, body) {
   return data;
 }
 
-// Driving times between every pair of places, in seconds, from one request. Kept, so "Build another"
-// needs only the route. The planner leaves gaps where its quick check finds no way in (car park
-// entrances often), and if this request fails altogether, every time is a gap. Gaps are filled with
-// estimates, and the route request has the final say.
-const timesCache = new Map();
-async function travelTimes(points) {
+// ---------- Drive times ----------
+// A table of drive times between every pair of places, in seconds. The free planner gives at most 100
+// times a request (10 places to the same 10), so it's asked about the places most likely to be used.
+// The rest are estimated from the straight-line distance, at the pace of the times it gave, and the
+// times of routes it makes are added as they come. Kept for each start point, so "Build another" gains.
+const tables = new Map();
+function tableFor(points) {
   const key = points.map(p => `${coord(p.navLat)},${coord(p.navLon)}`).join("|");
-  if (timesCache.has(key)) return timesCache.get(key);
-  const n = points.length;
-  const times = Array.from({ length: n }, () => Array(n).fill(null));
-  try {
-    const places = points.map(p => ({ lat: coord(p.navLat), lon: coord(p.navLon) }));
-    const data = await askRouter("sources_to_targets", { sources: places, targets: places, costing: "auto" });
-    const answer = data.sources_to_targets;
-    const keep = (i, j, t) => { if (times[i] && j < n && Number.isFinite(t)) times[i][j] = t; };
-    if (Array.isArray(answer)) {
-      answer.forEach((row, i) => (row || []).forEach((cell, j) => {
-        if (cell) keep(cell.from_index ?? i, cell.to_index ?? j, cell.time);
-      }));
-    } else if (answer && Array.isArray(answer.durations)) {
-      answer.durations.forEach((row, i) => (row || []).forEach((t, j) => keep(i, j, t)));
-    } else {
-      logPlanner("sources_to_targets: the answer wasn't in a shape this page knows, so times are estimated");
-    }
-  } catch (err) {
-    if (err.busy || err.slow) throw err;
-    logPlanner(`sources_to_targets failed, so driving times are estimated: ${err.message}`);
+  if (!tables.has(key)) {
+    const at = p => ({ lat: p.navLat, lon: p.navLon });
+    const n = points.length;
+    tables.set(key, refresh({
+      points, miles: points.map(a => points.map(b => milesBetween(at(a), at(b)))),
+      real: Array.from({ length: n }, () => Array(n).fill(null)),
+      model: { overhead: TEST.overhead, pace: TEST.pace },
+    }));
   }
-  const table = fillGaps(points, times);
-  logPlanner(`driving times: ${table.known} from the planner, ${n * (n - 1) - table.known} estimated, ` +
-             `${Math.round(table.pace)} seconds a mile`);
-  if (table.known) timesCache.set(key, table);  // a failed request is asked again next time
+  return tables.get(key);
+}
+
+// Fit "overhead + pace x straight-line miles" to the planner's times, then fill in the others with it
+function refresh(table) {
+  const { miles, real } = table, xs = [], ys = [];
+  real.forEach((row, i) => row.forEach((t, j) => {
+    if (i !== j && t != null && miles[i][j] >= 0.1) { xs.push(miles[i][j]); ys.push(t); }
+  }));
+  if (xs.length >= 8) {
+    const mean = list => list.reduce((a, b) => a + b, 0) / list.length;
+    const mx = mean(xs), my = mean(ys);
+    const sxx = xs.reduce((sum, x) => sum + (x - mx) ** 2, 0);
+    const sxy = xs.reduce((sum, x, k) => sum + (x - mx) * (ys[k] - my), 0);
+    const pace = sxx > 0 ? Math.min(900, Math.max(120, sxy / sxx)) : TEST.pace;
+    table.model = { pace, overhead: Math.min(180, Math.max(0, my - pace * mx)) };
+  }
+  const { overhead, pace } = table.model;
+  table.seconds = real.map((row, i) => row.map((t, j) => i === j ? 0 : t ?? overhead + pace * miles[i][j]));
+  table.guessed = real.map((row, i) => row.map((t, j) => i !== j && t == null));
+  table.known = real.reduce((count, row, i) => count + row.filter((t, j) => i !== j && t != null).length, 0);
   return table;
 }
 
-// Estimates from the straight-line distance, at the pace of the times the planner did give
-function fillGaps(points, times) {
-  const n = points.length;
-  const at = i => ({ lat: points[i].navLat, lon: points[i].navLon });
-  const paces = [];
-  let known = 0;
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) {
-      if (i === j || times[i][j] == null) continue;
-      known += 1;
-      const miles = milesBetween(at(i), at(j));
-      if (miles >= 0.2) paces.push(times[i][j] / miles);
-    }
+// Ask the planner for the times between some of the places in the table (by their positions in it)
+async function askTimes(table, which) {
+  if (!which.some(i => which.some(j => i !== j && table.real[i][j] == null))) return;  // known already
+  const places = which.map(i => ({ lat: coord(table.points[i].navLat), lon: coord(table.points[i].navLon) }));
+  let data;
+  try {
+    data = await askRouter("sources_to_targets", { sources: places, targets: places, costing: "auto" });
+  } catch (err) {
+    if (err.busy || err.slow) throw err;
+    logPlanner(`sources_to_targets failed, so drive times are estimated: ${err.message}`);
+    return;
   }
-  const pace = paces.length >= 5 ? Math.min(600, Math.max(100, median(paces))) : TEST.pace;
-  const guessed = times.map(row => row.map(t => t == null));
-  const seconds = times.map((row, i) => row.map((t, j) =>
-    i === j ? 0 : t ?? pace * milesBetween(at(i), at(j))));
-  return { seconds, guessed, known, pace };
+  const answer = data.sources_to_targets;
+  const keep = (a, b, t) => {
+    if (a < which.length && b < which.length && Number.isFinite(t)) table.real[which[a]][which[b]] = t;
+  };
+  if (Array.isArray(answer)) {
+    answer.forEach((row, a) => (row || []).forEach((cell, b) => {
+      if (cell) keep(cell.from_index ?? a, cell.to_index ?? b, cell.time);
+    }));
+  } else if (answer && Array.isArray(answer.durations)) {
+    answer.durations.forEach((row, a) => (row || []).forEach((t, b) => keep(a, b, t)));
+  } else {
+    logPlanner("sources_to_targets: the answer wasn't in a shape this page knows");
+  }
+  refresh(table);
+  logPlanner(`drive times: ${table.known} from the planner, the others estimated at ` +
+             `${Math.round(table.model.overhead)} s plus ${Math.round(table.model.pace)} s a mile`);
 }
 
-// After a route comes back, correct the estimates by how far out they were
-function rescaled(table, factor) {
-  const f = Math.min(2, Math.max(0.5, factor));
-  return { ...table, seconds: table.seconds.map((row, i) => row.map((t, j) => table.guessed[i][j] ? t * f : t)) };
+// Legs of a route that go straight from one stop to the next are drive times too
+function learnFrom(table, index, pick, legs) {
+  let from = 0, leg = 0, direct = true;
+  for (const part of [...pick.order, null]) {
+    if (part && part.via) { direct = false; continue; }
+    const to = part ? index.get(part.spot.id) : 0;
+    const uphill = part && part.type === "hill_start";  // that leg may include a loop to arrive uphill
+    if (direct && !uphill && table.real[from][to] == null) table.real[from][to] = legs[leg].seconds;
+    from = to;
+    leg += 1;
+    direct = true;
+  }
+  refresh(table);
+}
+
+// How long the planner should take to drive a test, by the table: the drives, plus a little for each
+// place passed through in one direction and for arriving uphill, as either can mean going round a block
+function loopSeconds(table, at, order, parts, uphill) {
+  let seconds = uphill, guesses = 0, from = 0;
+  for (const to of [...order.map(k => at[k]), 0]) {  // then back to the start
+    seconds += table.seconds[from][to];
+    if (table.guessed[from][to]) guesses += 1;
+    from = to;
+  }
+  seconds += TEST.viaExtra * parts.filter(part => part.via).length;
+  return { seconds, guesses };
 }
 
 function spreadOut(places, n) {  // a mix of near and far, not all bunched together
@@ -804,9 +846,10 @@ function planTest() {
   return { items, notes, roundabouts, fillers, points: all };
 }
 
-// Pick one spot for each part, some roundabouts and an order, so the test lasts about as long as asked.
-// Spots in "avoid" were in a route the planner couldn't make, so others are used where there's a choice.
-function fitLength(plan, index, table, avoid = new Set()) {
+// Pick one spot for each part, some places to pass through and an order, so the test lasts about as long
+// as asked. Spots in "avoid" were in a route the planner couldn't make, so others are used where there's
+// a choice. "scale" allows for routes coming out longer or shorter than the table says.
+function fitLength(plan, index, table, { avoid = new Set(), scale = 1, tries = TEST.tries } = {}) {
   const minutesStopped = plan.items.reduce((sum, item) => sum + item.minutes, 0);
   const target = Math.max(5, state.test.minutes - minutesStopped) * 60 / TEST.slowdown;
   const fresh = list => {
@@ -815,9 +858,10 @@ function fitLength(plan, index, table, avoid = new Set()) {
   };
   const roundabouts = state.test.roundabouts ? fresh(plan.roundabouts) : [];
   const fillers = fresh(plan.fillers);
-  const guessCost = table.known ? 90 : 0;  // prefer drives the planner has timed
+  const guessCost = table.known ? 60 : 0;  // prefer drives the planner has timed
+  const uphill = plan.items.some(item => item.type === "hill_start") ? TEST.uphillExtra : 0;
   let best = null;
-  for (let attempt = 0; attempt < TEST.tries; attempt++) {
+  for (let attempt = 0; attempt < tries; attempt++) {
     const stops = plan.items.map(item => ({ ...item, spot: pickOne(fresh(item.options)) }));
     const k = roundabouts.length ? Math.min(roundabouts.length, pickOne(TEST.roundabouts)) : 0;
     const vias = shuffle(roundabouts.slice()).slice(0, k).map(r => ({ via: true, spot: r }));
@@ -832,21 +876,29 @@ function fitLength(plan, index, table, avoid = new Set()) {
     const parts = [...stops, ...vias];
     const at = parts.map(part => index.get(part.spot.id));
     for (const order of ordersOf(parts.length)) {
-      let seconds = 0, guesses = 0, from = 0;
-      for (const to of [...order.map(k => at[k]), 0]) {  // then back to the start
-        seconds += table.seconds[from][to];
-        if (table.guessed[from][to]) guesses += 1;
-        from = to;
-      }
+      const { seconds, guesses } = loopSeconds(table, at, order, parts, uphill);
       const firstStop = order.find(k => !parts[k].via);
       const stopFirst = parts[firstStop].type === "emergency_stop" && stops.length > 1 ? 300 : 0;
-      const score = Math.abs(seconds - target) + repeats + stopFirst + guessCost * guesses;
+      const score = Math.abs(seconds * scale - target) + repeats + stopFirst + guessCost * guesses;
       if (!best || score < best.score) {
-        best = { score, order: order.map(k => parts[k]), seconds, guesses, target, minutesStopped };
+        best = { score, order: order.map(k => parts[k]), at: order.map(k => at[k]), seconds, guesses, target,
+                 minutesStopped, uphill };
       }
     }
   }
   return best;
+}
+
+// The start, and the places in the best few tests the table can make now, up to the planner's limit
+function likelyPlaces(plan, index, table) {
+  const chosen = new Set([0]), avoid = new Set();
+  for (let round = 0; round < 6 && chosen.size < TEST.matrixPlaces; round++) {
+    for (const part of fitLength(plan, index, table, { avoid, tries: 120 }).order) {
+      if (chosen.size < TEST.matrixPlaces) chosen.add(index.get(part.spot.id));
+      avoid.add(part.spot.id);
+    }
+  }
+  return [...chosen];
 }
 
 function decodeLine(text, precision = 6) {  // the planner's compressed route shape
@@ -894,17 +946,17 @@ async function routeFor(pick, uphill = true) {
   }));
 }
 
-// Ask for the route. If the planner can't make it, try again with other spots, and on the last try
-// without asking to arrive uphill. If some driving times were estimates and the route came out well
-// off the length asked for, correct the estimates and try once more, keeping whichever is closer.
+// Ask for the route. If the planner can't make it, try again with other spots (after two refusals,
+// without asking to arrive uphill). If it comes out well off the length asked for, the table has learned
+// from it, so fit again allowing for how far out it was, and keep whichever test is closest.
 async function routeTest(plan, index, table) {
   const avoid = new Set();
-  let best = null, problem = null, corrected = false;
+  let best = null, problem = null, scale = 1;
   for (let attempt = 1; attempt <= TEST.attempts; attempt++) {
-    const pick = fitLength(plan, index, table, avoid);
+    const pick = fitLength(plan, index, table, { avoid, scale });
     let legs;
     try {
-      legs = await routeFor(pick, attempt < TEST.attempts);
+      legs = await routeFor(pick, !problem || attempt < TEST.attempts);
     } catch (err) {
       if (stopTrying(err)) {
         if (best) break;
@@ -914,13 +966,14 @@ async function routeTest(plan, index, table) {
       for (const part of pick.order) avoid.add(part.spot.id);
       continue;
     }
+    learnFrom(table, index, pick, legs);
     const seconds = legs.reduce((sum, leg) => sum + leg.seconds, 0);
     const off = Math.abs(seconds - pick.target);
     if (!best || off < best.off) best = { pick, legs, seconds, off };
-    if (corrected || !pick.guesses || off <= 0.2 * pick.target) break;
-    logPlanner(`the route took ${Math.round(seconds)} seconds, not about ${Math.round(pick.target)}, so trying once more`);
-    table = rescaled(table, seconds / pick.seconds);
-    corrected = true;
+    if (off <= TEST.tolerance * pick.target) break;
+    const now = loopSeconds(table, pick.at, pick.at.map((_, k) => k), pick.order, pick.uphill).seconds;
+    scale = Math.min(2, Math.max(0.5, seconds / now));
+    logPlanner(`the route took ${Math.round(seconds)} s, not about ${Math.round(pick.target)} s, so fitting again`);
   }
   if (!best) throw problem;
   return best;
@@ -964,7 +1017,8 @@ async function buildTest(event) {
     const points = [{ id: "start", navLat: state.origin.lat, navLon: state.origin.lon },
                     ...plan.points, ...plan.roundabouts, ...plan.fillers].filter(p => !seen.has(p.id) && seen.add(p.id));
     const index = new Map(points.map((p, i) => [p.id, i]));
-    const table = await travelTimes(points);
+    const table = tableFor(points);
+    await askTimes(table, likelyPlaces(plan, index, table));
     setStatus("Working out the route...");
     const { pick, legs, seconds } = await routeTest(plan, index, table);
     pick.minutes = Math.round(seconds * TEST.slowdown / 60 + pick.minutesStopped);  // from the real route
