@@ -33,27 +33,28 @@
   .page { max-width: 600px; margin: 0 auto; }
   [hidden] { display: none !important; }
 
-  /* Top: title, the two modes and the two ways to choose a start point */
+  /* Top: title, the three modes and the two ways to choose a start point */
   .top { padding: 22px 16px 6px; }
   h1 { margin: 0; font-size: 34px; line-height: 1.05; letter-spacing: -0.01em; }
   .lede { margin: 6px 0 14px; color: var(--kerb); }
   .modes {
-    display: grid; grid-template-columns: 1fr 1fr; margin: 0 0 14px;
+    display: grid; grid-template-columns: repeat(3, 1fr); margin: 0 0 14px;
     border: 2px solid var(--black); border-radius: 12px; overflow: hidden;
   }
   .mode {
-    min-height: 48px; font: inherit; font-weight: 700; color: var(--black);
+    min-height: 48px; padding: 4px 6px; font: inherit; font-weight: 700; line-height: 1.2; color: var(--black);
     background: var(--white); border: 0; cursor: pointer;
   }
   .mode + .mode { border-left: 2px solid var(--black); }
   .mode[aria-pressed="true"] { background: var(--black); color: var(--white); }
   .find { display: grid; gap: 10px; }
   .search { display: flex; gap: 8px; }
-  .search input, select {
+  .search input, .field, select {
     font: inherit; min-height: 50px; color: var(--black);
     border: 2px solid var(--black); border-radius: 10px; background: var(--white);
   }
   .search input { flex: 1; min-width: 0; padding: 0 14px; }
+  .field { width: 100%; min-width: 0; padding: 0 14px; }
   select { width: 100%; padding: 0 10px; }
   .status { margin: 12px 0 0; min-height: 1.45em; }
   .status.problem { color: var(--red); font-weight: 700; }
@@ -91,6 +92,8 @@
   .option { display: grid; grid-template-columns: 8.2em 1fr; align-items: center; gap: 10px; }
   .option-name { font-weight: 700; }
   .choice { display: flex; gap: 8px; }
+  .choice.wrap { flex-wrap: wrap; }
+  .option.stack { grid-template-columns: 1fr; gap: 8px; }
   .ticks { display: flex; flex-wrap: wrap; gap: 6px 22px; }
   .tick { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; font-weight: 700; }
   .tick input { width: 22px; height: 22px; margin: 0; accent-color: var(--black); }
@@ -141,6 +144,7 @@
     background: var(--yellow); border: 2px solid var(--black); color: var(--black); font-weight: 700;
   }
   .badge { width: 36px; height: 36px; border-radius: 8px; font-size: 20px; }
+  .badge-end { background: var(--black); color: var(--white); }
   .stop-name { margin: 0; font-size: 22px; line-height: 1.15; }
   .leg-time { margin: 0; font-weight: 700; white-space: nowrap; }
   .stop-kind { margin: 10px 0 0; font-weight: 700; }
@@ -161,6 +165,10 @@
   .spot-icon svg { width: 28px; height: 28px; filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff); }
   .num { width: 30px; height: 30px; border-radius: 7px; font: 700 17px/1 var(--font); }
   .via { display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--white); border: 4px solid var(--black); }
+  .end {
+    display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 7px;
+    background: var(--black); color: var(--white); border: 2px solid var(--white); font: 700 17px/1 var(--font);
+  }
   .me {
     display: block; width: 20px; height: 20px; border-radius: 50%;
     background: var(--blue); border: 3px solid var(--white);
@@ -181,10 +189,12 @@
 <div class="page">
   <header class="top">
     <h1>Driving practice</h1>
-    <p class="lede">Quiet streets and car parks to practise in, and mock tests that start wherever you are.</p>
+    <p class="lede">Quiet streets and car parks to practise in, mock tests that start wherever you are, and
+       journeys with practice on the way.</p>
     <div class="modes" role="group" aria-label="What to show">
       <button class="mode" type="button" data-mode="spots" aria-pressed="true">Practice spots</button>
       <button class="mode" type="button" data-mode="test" aria-pressed="false">Mock test</button>
+      <button class="mode" type="button" data-mode="trip" aria-pressed="false">A to B</button>
     </div>
     <div class="find">
       <button id="locate" class="btn btn-go" type="button">Use my location</button>
@@ -230,6 +240,18 @@
     </div>
     <button id="build" class="btn btn-go" type="submit">Build my test</button>
   </form>
+  <form id="trip-options" class="options" aria-label="A to B options" hidden>
+    <label class="option">
+      <span class="option-name">Where to</span>
+      <input id="dest" class="field" type="search" placeholder="Postcode or town" autocomplete="postal-code"
+             enterkeyhint="go" spellcheck="false">
+    </label>
+    <div class="option stack">
+      <span class="option-name" id="practise-name">Practise on the way</span>
+      <div id="activities" class="choice wrap" role="group" aria-labelledby="practise-name"></div>
+    </div>
+    <button id="plan" class="btn btn-go" type="submit">Plan my route</button>
+  </form>
 </div>
 <div id="map" class="map" role="region" aria-label="Map"></div>
 <div class="page">
@@ -237,7 +259,7 @@
   <footer class="foot">
     <p>Check a spot in Street View before you go. Set your route before you drive: using a hand-held
        phone at the wheel is illegal, and so is using one while you supervise a learner.</p>
-    <p>Mock tests are practice routes made up from the spots here, not real test routes. Driving times
+    <p>Mock tests and A to B routes are made up from the spots here, not real test routes. Driving times
        are estimates. Distances in the spot list are in a straight line, and spots are picked from
        OpenStreetMap data, so treat them as suggestions.</p>
     <p>Map &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors.
@@ -280,6 +302,12 @@ const TEST = {
   viaExtra: 45,        // passing through a place in one direction can mean going round a block
   uphillExtra: 45,     // so can arriving at a hill start uphill
 };
+// A to B routes: practice spots near the way, picked so the journey takes as little extra time as it can
+const TRIP = {
+  corridor: 0.25,      // spots up to this share of the journey's straight-line length off the straight line,
+  minMiles: 1,         // but at least this many miles off it
+  maxMiles: 3,         // and at most this many
+};
 // Add #debug to the end of the web address to see what the route planner was asked and what it said
 const DEBUG = location.hash === "#debug";
 
@@ -320,6 +348,15 @@ const EXTRAS = {
     text: s => `Pull up on the left on ${s.street}. When you drive on, your supervisor checks it's clear behind, then says "Stop". Stop as quickly as you safely can.` },
 };
 
+// What an A to B route can include, in the order they're offered
+const ACTIVITIES = {
+  parallel_park: MANOEUVRES.parallel_park,
+  pull_up_right: MANOEUVRES.pull_up_right,
+  bay_reverse: { ...MANOEUVRES.bay_reverse, chip: "Bay park" },
+  hill_start: EXTRAS.hill_start,
+  emergency_stop: EXTRAS.emergency_stop,
+};
+
 // Road-sign shapes, so the types can be told apart without relying on colour
 const SYMBOLS = {
   hill_start: '<svg viewBox="0 0 28 28" aria-hidden="true"><path d="M14 2.5 26 25H2z" fill="#fff" stroke="#C8102E" stroke-width="3" stroke-linejoin="round"/><path d="M7.5 21.5h11v-6.5z"/></svg>',
@@ -335,6 +372,7 @@ const REDUCED_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").mat
 const state = {
   spots: [], roundabouts: [], origin: null, originText: "", kind: "all", mode: "spots", result: null,
   test: { minutes: 40, manoeuvre: "surprise", emergency: "real", hill: true, roundabouts: true },
+  trip: { activities: new Set(["parallel_park", "hill_start"]), dest: null, destText: "", result: null, used: new Set() },
 };
 const $ = id => document.getElementById(id);
 
@@ -359,6 +397,15 @@ const median = list => list.slice().sort((a, b) => a - b)[Math.floor(list.length
 const areaOf = file => ((file.match(/^spots_(.+)\.geojson$/i) || [])[1] || "")
   .replace(/[_-]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 const where = o => o.label === "you" ? "where you are" : o.label;
+// "45 minutes", "1 hour 5 minutes", "2 hours"
+function formatDuration(minutes) {
+  const m = Math.max(1, Math.round(minutes));
+  if (m < 60) return `${m} minute${m === 1 ? "" : "s"}`;
+  const h = Math.floor(m / 60), rest = m % 60;
+  return `${h} hour${h === 1 ? "" : "s"}${rest ? ` ${rest} minute${rest === 1 ? "" : "s"}` : ""}`;
+}
+// "a", "a and b", "a, b and c"
+const listOf = parts => parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0] || "";
 const scrollTo = id => $(id).scrollIntoView({ behavior: REDUCED_MOTION ? "auto" : "smooth", block: "start" });
 
 function shuffle(list) {
@@ -501,8 +548,10 @@ async function getJSON(url) {
   return res.json();
 }
 
-// Postcodes, the first half of a postcode (like SM1), or a place name, via postcodes.io
-async function lookUp(text) {
+// Postcodes, the first half of a postcode (like SM1), or a place name, via postcodes.io.
+// Many places share a name (there are dozens of Suttons), so of those with the name asked for, take the
+// one nearest to "near" (the start, when looking up where a route goes), or else to the practice spots.
+async function lookUp(text, near = null) {
   const compact = text.replace(/\s+/g, "").toUpperCase();
   if (FULL_POSTCODE.test(compact)) {
     const r = await getJSON(`https://api.postcodes.io/postcodes/${encodeURIComponent(compact)}`);
@@ -517,13 +566,16 @@ async function lookUp(text) {
       return { lat: r.result.latitude, lon: r.result.longitude, label: r.result.outcode };
     }
   }
-  const r = await getJSON(`https://api.postcodes.io/places?q=${encodeURIComponent(text.trim())}&limit=20`);
+  const r = await getJSON(`https://api.postcodes.io/places?q=${encodeURIComponent(text.trim())}&limit=100`);
   const places = ((r && r.result) || []).filter(p => p.latitude != null);
   if (!places.length) return null;
   const wanted = text.trim().toLowerCase();
-  const rank = p => (p.name_1 && p.name_1.toLowerCase() === wanted ? 0 : 10) +
-                    (PLACE_RANK.includes(p.local_type) ? PLACE_RANK.indexOf(p.local_type) : PLACE_RANK.length);
-  const best = places.slice().sort((a, b) => rank(a) - rank(b))[0];
+  const exact = places.filter(p => [p.name_1, p.name_2].some(n => n && n.toLowerCase() === wanted));
+  const refs = near ? [near] : state.spots;
+  const miles = p => refs.length ? Math.min(...refs.map(q => milesBetween({ lat: p.latitude, lon: p.longitude }, q))) : 0;
+  const size = p => PLACE_RANK.includes(p.local_type) ? PLACE_RANK.indexOf(p.local_type) : PLACE_RANK.length;
+  const score = p => miles(p) + 2 * size(p);  // nearer first; between places about as near, the bigger one
+  const best = (exact.length ? exact : places).slice().sort((a, b) => score(a) - score(b))[0];
   const area = best.county_unitary || best.district_borough || best.region;
   const label = area && area !== best.name_1 ? `${best.name_1}, ${area}` : best.name_1;
   return { lat: best.latitude, lon: best.longitude, label };
@@ -558,6 +610,7 @@ function setOrigin(origin, text = "") {
   state.origin = origin;
   state.originText = text;  // what was searched for, so Build my test can tell if the box has changed
   state.result = null;      // a mock test belongs to its start point
+  state.trip.result = null; // and so does a route
   render();
 }
 
@@ -592,6 +645,7 @@ function groupTitle(kind) {
 
 function render() {
   if (state.mode === "test") { renderTest(); return; }
+  if (state.mode === "trip") { renderTrip(); return; }
   const list = $("list");
   list.replaceChildren();
   const o = state.origin;
@@ -648,6 +702,10 @@ function setMode(mode) {
   for (const b of document.querySelectorAll(".mode")) b.setAttribute("aria-pressed", String(b.dataset.mode === mode));
   $("kinds").hidden = mode !== "spots";
   $("test-options").hidden = mode !== "test";
+  $("trip-options").hidden = mode !== "trip";
+  const from = mode === "trip" ? "From: postcode or town" : "Postcode or town";
+  $("place").placeholder = from;
+  document.querySelector("label[for='place']").textContent = from;
   render();
 }
 
@@ -920,7 +978,7 @@ function decodeLine(text, precision = 6) {  // the planner's compressed route sh
   return points;
 }
 
-async function routeFor(pick, uphill = true) {
+async function routeFor(pick, uphill = true, end = state.origin) {
   const o = state.origin;
   const locations = [{ lat: coord(o.lat), lon: coord(o.lon), type: "break" }];
   for (const part of pick.order) {
@@ -931,7 +989,7 @@ async function routeFor(pick, uphill = true) {
     }
     locations.push(loc);
   }
-  locations.push({ lat: coord(o.lat), lon: coord(o.lon), type: "break" });
+  locations.push({ lat: coord(end.lat), lon: coord(end.lon), type: "break" });
   const data = await askRouter("route", { locations, costing: "auto", units: "miles", language: "en-US" });
   const legs = data.trip && data.trip.legs;
   if (!Array.isArray(legs) || legs.length !== pick.order.filter(p => !p.via).length + 1 ||
@@ -979,12 +1037,14 @@ async function routeTest(plan, index, table) {
   return best;
 }
 
-function routerProblem(err) {
-  if (err && err.busy) return ["The free route planner is busy. Wait a minute, then tap Build my test again."];
-  if (err && err.slow) return ["The free route planner didn't answer. Wait a minute, then tap Build my test again."];
+function routerProblem(err, {
+  failed = "The route planner couldn't make a test from here. Try again in a minute, or start from a different place.",
+  button = "Build my test",
+} = {}) {
+  if (err && err.busy) return [`The free route planner is busy. Wait a minute, then tap ${button} again.`];
+  if (err && err.slow) return [`The free route planner didn't answer. Wait a minute, then tap ${button} again.`];
   if (err && err.offline) return ["Couldn't reach the route planner. Check your connection, then try again."];
-  return ["The route planner couldn't make a test from here. Try again in a minute, or start from a different place.",
-          err && err.message ? `Details: ${err.message}` : ""];
+  return [failed, err && err.message ? `Details: ${err.message}` : ""];
 }
 
 function noSpotsNear(o) {
@@ -1044,11 +1104,12 @@ function stopCard(number, title, kindLine, text, leg, dest, vias, extra = []) {
     dest.street ? el("a", { className: "btn", href: streetViewLink(dest), target: "_blank", rel: "noopener" }, "Street View") : null,
     IS_IOS ? el("a", { className: "btn", href: appleLink(dest), target: "_blank", rel: "noopener" }, "Apple Maps") : null);
   const minutes = Math.max(1, Math.round(leg.seconds * TEST.slowdown / 60));
+  const shown = minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
   return el("article", { className: "sign stop" },
     el("div", { className: "stop-head" },
       el("span", { className: "badge", "aria-hidden": "true" }, number),
       el("h3", { className: "stop-name" }, el("span", { className: "visually-hidden" }, `Stop ${number}: `), title),
-      el("p", { className: "leg-time", "aria-label": `about ${minutes} minutes' drive` }, `${minutes} min`)),
+      el("p", { className: "leg-time", "aria-label": `about ${formatDuration(minutes)} of driving` }, shown)),
     kindLine ? el("p", { className: "stop-kind" }, kindLine) : null,
     text ? el("p", { className: "why" }, text) : null,
     ...extra,
@@ -1123,6 +1184,247 @@ function setUpTestOptions() {
   form.addEventListener("submit", buildTest);
 }
 
+// ---------- A to B routes ----------
+// How far a place is from the straight line between a and b, in miles
+function offLine(a, b, p) {
+  const k = Math.cos(a.lat * Math.PI / 180);
+  const x = q => (q.lon - a.lon) * 69.17 * k, y = q => (q.lat - a.lat) * 69.0;
+  const bx = x(b), by = y(b), px = x(p), py = y(p);
+  const length2 = bx * bx + by * by;
+  const t = length2 ? Math.min(1, Math.max(0, (px * bx + py * by) / length2)) : 0;
+  return Math.hypot(px - t * bx, py - t * by);
+}
+
+// Spots near the way for each thing to practise, best first: those adding the least distance, with the
+// ones in "avoid" (used last time) after the rest. The planner gives times for 10 places a request: the
+// start, the end and up to 8 spots. Things to practise on the same kind of spot share its candidates.
+function planTrip(avoid = new Set()) {
+  const a = state.origin, b = state.trip.dest, notes = [], items = [];
+  const straight = milesBetween(a, b);
+  const width = Math.min(TRIP.maxMiles, Math.max(TRIP.minMiles, straight * TRIP.corridor));
+  const chosen = Object.keys(ACTIVITIES).filter(type => state.trip.activities.has(type));
+  const per = Math.max(1, Math.floor((TEST.matrixPlaces - 2) / chosen.length));
+  for (const kind of new Set(chosen.map(type => ACTIVITIES[type].kind))) {
+    const types = chosen.filter(type => ACTIVITIES[type].kind === kind);
+    const options = state.spots.filter(s => s.kind === kind && offLine(a, b, s) <= width)
+      .map(s => ({ s, cost: milesBetween(a, s) + milesBetween(s, b) - straight + (avoid.has(s.id) ? 1000 : 0) }))
+      .sort((x, y) => x.cost - y.cost).slice(0, per * types.length).map(c => c.s);
+    types.forEach((type, k) => {
+      const task = ACTIVITIES[type];
+      if (k < options.length) {
+        items.push({ type, ...task, options });  // each needs its own spot: fitTrip sees to that
+      } else if (!options.length) {
+        notes.push(`There are no ${KIND[kind].plural} near this route yet, so ${task.name.toLowerCase()} is left out.`);
+      } else {
+        notes.push(`There's only one ${KIND[kind].one.toLowerCase()} spot near this route, so ${task.name.toLowerCase()} is left out.`);
+      }
+    });
+  }
+  // back in the order they're offered
+  items.sort((x, y) => chosen.indexOf(x.type) - chosen.indexOf(y.type));
+  return { items, notes };
+}
+
+// One spot for each thing to practise, in the order that makes the drive shortest.
+// Table positions: 0 is the start, 1 the end. Spots in "avoid" are used only if there's nothing else.
+function fitTrip(plan, index, table, avoid = new Set()) {
+  const uphill = plan.items.some(item => item.type === "hill_start") ? TEST.uphillExtra : 0;
+  const guessCost = table.known ? 60 : 0;
+  let best = null;
+  const choose = (k, picked) => {
+    if (k < plan.items.length) {
+      for (const s of plan.items[k].options) {
+        if (!picked.some(p => p.id === s.id)) choose(k + 1, [...picked, s]);  // one spot can't be two stops
+      }
+      return;
+    }
+    const at = picked.map(s => index.get(s.id));
+    const used = picked.filter(s => avoid.has(s.id)).length;
+    for (const order of ordersOf(picked.length)) {
+      let seconds = uphill, guesses = 0, from = 0;
+      for (const to of [...order.map(j => at[j]), 1]) {  // then on to the end
+        seconds += table.seconds[from][to];
+        if (table.guessed[from][to]) guesses += 1;
+        from = to;
+      }
+      const score = seconds + guessCost * guesses + 3600 * used;
+      if (!best || score < best.score) {
+        best = { score, seconds, order: order.map(j => ({ ...plan.items[j], spot: picked[j] })) };
+      }
+    }
+  };
+  choose(0, []);
+  return best;
+}
+
+// Ask for the route, and if the planner can't make it, try again with other spots
+// (after two refusals, without asking to arrive uphill)
+async function routeTrip(plan, index, table, avoid) {
+  const tried = new Set(avoid);
+  let problem = null;
+  for (let attempt = 1; attempt <= TEST.attempts; attempt++) {
+    const pick = fitTrip(plan, index, table, tried);
+    try {
+      return { pick, legs: await routeFor(pick, !problem || attempt < TEST.attempts, state.trip.dest) };
+    } catch (err) {
+      if (stopTrying(err)) throw err;
+      problem = err;
+      for (const part of pick.order) tried.add(part.spot.id);
+    }
+  }
+  throw problem;
+}
+
+// "Use other spots" calls this with no event, to avoid the spots the last route used
+async function buildTrip(event) {
+  if (event) event.preventDefault();
+  const button = $("plan"), t = state.trip;
+  button.disabled = true;
+  try {
+    const typed = $("place").value.trim();  // a start typed but not searched for
+    if (typed && typed !== state.originText && !(await startFrom(typed))) return;
+    if (!state.origin) {
+      setStatus("Use your location, or search for a postcode or town, to choose where you're starting from.", true);
+      return;
+    }
+    const destText = $("dest").value.trim();
+    if (!destText) {
+      setStatus("Enter where you're going: a postcode or the name of a town.", true);
+      $("dest").focus();
+      return;
+    }
+    if (destText !== t.destText || !t.dest) {
+      setStatus(`Looking up ${destText}...`);
+      let place;
+      try {
+        place = await lookUp(destText, state.origin);
+      } catch (err) {
+        setStatus("The postcode search isn't answering. Check your connection, then try again.", true);
+        return;
+      }
+      if (!place) {
+        setStatus(`Couldn't find "${destText}". Try a full postcode, or the name of a town.`, true);
+        return;
+      }
+      Object.assign(t, { dest: place, destText, result: null, used: new Set() });
+      $("dest").blur();
+    }
+    if (!t.activities.size) {
+      setStatus("Choose at least one thing to practise on the way.", true);
+      return;
+    }
+    const avoid = event ? new Set() : t.used;
+    const plan = planTrip(avoid);
+    if (!plan.items.length) {
+      const areas = listOf([...new Set(state.spots.map(s => s.area).filter(Boolean))]);
+      setStatus(`There are no practice spots near this route yet.${areas ? ` So far there are spots around ${areas}.` : ""}`, true);
+      return;
+    }
+    setStatus("Planning your route...");
+    const seen = new Set();
+    const points = [{ id: "start", navLat: state.origin.lat, navLon: state.origin.lon },
+                    { id: "end", navLat: t.dest.lat, navLon: t.dest.lon },
+                    ...plan.items.flatMap(item => item.options)].filter(p => !seen.has(p.id) && seen.add(p.id));
+    const index = new Map(points.map((p, i) => [p.id, i]));
+    const table = tableFor(points);
+    await askTimes(table, points.map((_, i) => i));
+    setStatus("Working out the route...");
+    const { pick, legs } = await routeTrip(plan, index, table, avoid);
+    const stopped = pick.order.reduce((sum, stop) => sum + stop.minutes, 0);
+    const driving = legs.reduce((sum, leg) => sum + leg.seconds, 0);
+    // The straight drive, to compare: the table has it unless the journey is long, so ask then
+    let direct = table.real[0][1];
+    if (direct == null) {
+      try {
+        const data = await askRouter("route", { costing: "auto", units: "miles", language: "en-US", locations: [
+          { lat: coord(state.origin.lat), lon: coord(state.origin.lon), type: "break" },
+          { lat: coord(t.dest.lat), lon: coord(t.dest.lon), type: "break" }] });
+        direct = data.trip && data.trip.summary ? data.trip.summary.time : null;
+      } catch (err) {
+        direct = null;  // the comparison is left out
+      }
+    }
+    t.result = {
+      plan, pick, legs,
+      minutes: Math.round(driving * TEST.slowdown / 60 + stopped),
+      direct: direct == null ? null : Math.round(direct * TEST.slowdown / 60),
+    };
+    t.used = new Set(pick.order.map(stop => stop.spot.id));
+    renderTrip();
+    scrollTo("map");
+  } catch (err) {
+    logPlanner(`no route: ${err && err.message}`);
+    const [text, detail = ""] = routerProblem(err, {
+      failed: "The route planner couldn't make this route. Try again in a minute, or choose other places.",
+      button: "Plan my route",
+    });
+    setStatus(text, true, detail);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderTrip() {
+  const list = $("list");
+  list.replaceChildren();
+  const o = state.origin, t = state.trip, r = t.result;
+  if (!r) {
+    drawMarkers([], o);
+    setStatus(o ? `The route will start from ${where(o)}. Enter where you're going and what to practise, then tap Plan my route.`
+                : "Use your location, or search for a postcode or town, to choose where you're starting from.");
+    return;
+  }
+  const stops = r.pick.order;
+  const miles = r.legs.reduce((sum, leg) => sum + leg.miles, 0);
+  const roundabouts = r.legs.reduce((sum, leg) => sum + leg.roundabouts, 0);
+  const parts = stops.map(stop => stop.name.toLowerCase());
+  if (roundabouts) parts.push(`${roundabouts} roundabout${roundabouts === 1 ? "" : "s"}`);
+  const extra = r.direct == null ? null : r.minutes - r.direct;
+  const compared = extra == null ? null : extra >= 2
+    ? `That's about ${formatDuration(extra)} longer than driving straight there, practice included.`
+    : "That's about as long as driving straight there.";
+  list.append(el("section", { className: "group" },
+    el("article", { className: "sign summary" },
+      el("h2", { className: "summary-title" }, `Your route to ${t.dest.label}`),
+      el("p", { className: "summary-time" }, `About ${formatDuration(r.minutes)}, ${miles.toFixed(1)} miles`),
+      compared ? el("p", { className: "why" }, compared) : null,
+      el("p", { className: "why" }, `${sentence(listOf(parts))}.`),
+      ...r.plan.notes.map(n => el("p", { className: "note" }, n)))));
+  const section = el("section", { className: "group" });
+  stops.forEach((stop, i) => {
+    const s = stop.spot;
+    section.append(stopCard(i + 1, s.street, stop.name, stop.text(s), r.legs[i], s, [], [
+      s.note ? el("p", { className: "note" }, s.note) : null,
+      s.nearSchool ? el("p", { className: "warn" }, "Near a school: avoid school-run times") : null,
+    ]));
+  });
+  const arrive = stopCard("B", `Arrive at ${t.dest.label}`, "", "", r.legs[stops.length],
+                          { navLat: t.dest.lat, navLon: t.dest.lon }, []);
+  arrive.querySelector(".badge").classList.add("badge-end");  // like the B on the map
+  arrive.querySelector(".stop-name .visually-hidden").textContent = "End: ";
+  section.append(arrive);
+  section.append(el("div", { className: "rebuild" },
+    el("button", { className: "btn", type: "button", onclick: () => buildTrip() }, "Use other spots")));
+  list.append(section);
+  setStatus(`Your route is ready: about ${formatDuration(r.minutes)} from ${where(o)} to ${t.dest.label}.`);
+  drawTest(r, t.dest);
+}
+
+function setUpTripOptions() {
+  for (const [type, task] of Object.entries(ACTIVITIES)) {
+    const b = el("button", { className: "kind", type: "button", "aria-pressed": String(state.trip.activities.has(type)) },
+                 task.chip || task.name);
+    b.dataset.activity = type;
+    b.addEventListener("click", () => {
+      const on = !state.trip.activities.has(type);
+      if (on) state.trip.activities.add(type); else state.trip.activities.delete(type);
+      b.setAttribute("aria-pressed", String(on));
+    });
+    $("activities").append(b);
+  }
+  $("trip-options").addEventListener("submit", buildTrip);
+}
+
 // ---------- The map ----------
 let map = null, layer = null;
 const markers = new Map();
@@ -1158,7 +1460,10 @@ function addStart(origin, points) {
 }
 
 function fit(points) {
-  if (points.length) map.fitBounds(points, { padding: [30, 30], maxZoom: 16, animate: !REDUCED_MOTION });
+  // leave room for the zoom buttons in the top left corner
+  if (points.length) {
+    map.fitBounds(points, { paddingTopLeft: [56, 36], paddingBottomRight: [30, 36], maxZoom: 16, animate: !REDUCED_MOTION });
+  }
 }
 
 function drawMarkers(spots, origin) {
@@ -1182,7 +1487,7 @@ function drawMarkers(spots, origin) {
   fit(points);
 }
 
-function drawTest(r) {
+function drawTest(r, end = null) {
   if (!map) return;
   layer.clearLayers();
   markers.clear();
@@ -1193,6 +1498,13 @@ function drawTest(r) {
     points.push(...leg.line);
   }
   addStart(state.origin, points);
+  if (end) {
+    L.marker([end.lat, end.lon], {
+      icon: L.divIcon({ className: "", html: '<span class="end">B</span>', iconSize: [30, 30] }),
+      title: `End: ${end.label}`, keyboard: false, zIndexOffset: 900,
+    }).addTo(layer);
+    points.push([end.lat, end.lon]);
+  }
   let number = 0;
   for (const part of r.pick.order) {
     const s = part.spot;
@@ -1224,6 +1536,7 @@ function showOnMap(s) {
 async function start() {
   buildKindButtons();
   setUpTestOptions();
+  setUpTripOptions();
   setUpMap();
   for (const b of document.querySelectorAll(".mode")) b.addEventListener("click", () => setMode(b.dataset.mode));
   $("locate").addEventListener("click", locate);
