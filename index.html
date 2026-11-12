@@ -156,6 +156,41 @@
   .words ol { margin: 4px 0 0; padding-left: 1.5em; }
   .words li + li { margin-top: 4px; }
   .rebuild { display: grid; margin-top: 16px; }
+  .start { width: 100%; min-height: 56px; font-size: 19px; }
+  .start-note { margin: 6px 0 14px; color: var(--kerb); }
+
+  /* A to B: the routes to choose from */
+  .choices { display: grid; gap: 10px; margin-top: 12px; }
+  .choice-card {
+    display: grid; gap: 4px; width: 100%; padding: 12px 14px; text-align: left;
+    font: inherit; color: var(--black); background: var(--white);
+    border: 3px solid var(--black); border-radius: 12px; cursor: pointer;
+  }
+  .choice-card[aria-pressed="true"] { background: var(--black); color: var(--white); }
+  .choice-title { font-size: 20px; font-weight: 700; line-height: 1.2; }
+  .choice-shown { font-weight: 700; color: var(--yellow); }
+
+  /* Driving: the map fills the screen, with the next direction on top and Mute and End at the bottom */
+  body.driving .top, body.driving .kinds, body.driving .options, body.driving #list, body.driving .foot { display: none !important; }
+  body.driving .map {  /* the map library sets its own position on the element, hence !important */
+    position: fixed !important; top: 0; left: 0; right: 0; bottom: calc(76px + env(safe-area-inset-bottom));
+    height: auto; min-height: 0; border: 0; z-index: 1;
+  }
+  .drive {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+    padding: calc(12px + env(safe-area-inset-top)) 16px 14px;
+    background: var(--black); color: var(--white);
+  }
+  .drive-dist { margin: 0; font-size: 40px; font-weight: 700; line-height: 1; }
+  .drive-text { margin: 6px 0 0; font-size: 24px; font-weight: 700; line-height: 1.2; }
+  .drive-next { margin: 8px 0 0; color: #D5D8DB; }
+  .drive-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    background: var(--pavement); border-top: 2px solid var(--black);
+  }
+  .drive-bar .btn[aria-pressed="true"] { background: var(--black); color: var(--white); }
 
   .foot { padding: 8px 16px 44px; color: var(--kerb); font-size: 15px; }
   .foot p { margin: 0 0 10px; max-width: 62ch; }
@@ -165,6 +200,10 @@
   .spot-icon svg { width: 28px; height: 28px; filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff); }
   .num { width: 30px; height: 30px; border-radius: 7px; font: 700 17px/1 var(--font); }
   .via { display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--white); border: 4px solid var(--black); }
+  .finish {
+    display: block; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--black); border: 4px solid var(--white); box-shadow: 0 0 0 2px var(--black);
+  }
   .end {
     display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 7px;
     background: var(--black); color: var(--white); border: 2px solid var(--white); font: 700 17px/1 var(--font);
@@ -254,11 +293,21 @@
   </form>
 </div>
 <div id="map" class="map" role="region" aria-label="Map"></div>
+<section id="drive" class="drive" aria-label="Directions" hidden>
+  <p id="drive-dist" class="drive-dist"></p>
+  <p id="drive-text" class="drive-text" aria-live="polite"></p>
+  <p id="drive-next" class="drive-next"></p>
+</section>
+<div id="drive-bar" class="drive-bar" hidden>
+  <button id="mute" class="btn" type="button" aria-pressed="false">Mute</button>
+  <button id="end" class="btn" type="button">End</button>
+</div>
 <div class="page">
   <main id="list" class="list"></main>
   <footer class="foot">
     <p>Check a spot in Street View before you go. Set your route before you drive: using a hand-held
-       phone at the wheel is illegal, and so is using one while you supervise a learner.</p>
+       phone at the wheel is illegal, and so is using one while you supervise a learner. For spoken
+       directions, put the phone in a holder and tap Start driving before you set off.</p>
     <p>Mock tests and A to B routes are made up from the spots here, not real test routes. Driving times
        are estimates. Distances in the spot list are in a straight line, and spots are picked from
        OpenStreetMap data, so treat them as suggestions.</p>
@@ -296,7 +345,8 @@ const TEST = {
   attempts: 3,         // routes to ask for in one go, to get the length right or get past a refusal
   tolerance: 0.12,     // a test this close to the length asked for is good enough
   waitSeconds: 20,     // stop waiting for the planner after this long
-  matrixPlaces: 10,    // the free planner gives at most 100 drive times a request: 10 places to 10
+  matrixPairs: 100,    // the free planner gives at most this many drive times a request
+  matrixPlaces: 10,    // so a mock test asks about 10 places: 10 to 10
   overhead: 30,        // estimated drive: this many seconds, plus
   pace: 340,           // this many seconds per straight-line mile (Sutton's pace), until the planner says
   viaExtra: 45,        // passing through a place in one direction can mean going round a block
@@ -307,6 +357,9 @@ const TRIP = {
   corridor: 0.25,      // spots up to this share of the journey's straight-line length off the straight line,
   minMiles: 1,         // but at least this many miles off it
   maxMiles: 3,         // and at most this many
+  places: 14,          // the start, the end and up to 12 spots, in two requests for drive times
+  options: 3,          // routes to choose from
+  slack: 480,          // a route to choose can take this many seconds longer than the quickest, or 40% more
 };
 // Add #debug to the end of the web address to see what the route planner was asked and what it said
 const DEBUG = location.hash === "#debug";
@@ -332,19 +385,19 @@ const LABEL_TO_KIND = {
 
 // What a mock test can ask for, how long each takes, and what to do
 const MANOEUVRES = {
-  parallel_park: { kind: "kerbside", name: "Parallel park", minutes: 4,
+  parallel_park: { kind: "kerbside", name: "Parallel park", minutes: 4, why: "to parallel park",
     text: s => `Pull up alongside a parked car on ${s.street}, then reverse in behind it, finishing within about 2 car lengths.` },
-  pull_up_right: { kind: "kerbside", name: "Pull up on the right", minutes: 3,
+  pull_up_right: { kind: "kerbside", name: "Pull up on the right", minutes: 3, why: "to pull up on the right",
     text: s => `Pull up on the right-hand side of ${s.street}, reverse about 2 car lengths, then rejoin the traffic.` },
-  bay_reverse: { kind: "bay_park", name: "Reverse bay park", minutes: 4,
+  bay_reverse: { kind: "bay_park", name: "Reverse bay park", minutes: 4, why: "to reverse into a bay",
     text: s => `In ${s.street}, reverse into a bay, then drive out.` },
-  bay_forward: { kind: "bay_park", name: "Forward bay park", minutes: 4,
+  bay_forward: { kind: "bay_park", name: "Forward bay park", minutes: 4, why: "to drive into a bay",
     text: s => `In ${s.street}, drive into a bay, then reverse out.` },
 };
 const EXTRAS = {
-  hill_start: { kind: "hill_start", name: "Hill start", minutes: 1.5,
+  hill_start: { kind: "hill_start", name: "Hill start", minutes: 1.5, why: "for a hill start",
     text: s => `On ${s.street}, pull up on the left while heading uphill, then move off again.` },
-  emergency_stop: { kind: "emergency_stop", name: "Emergency stop", minutes: 2,
+  emergency_stop: { kind: "emergency_stop", name: "Emergency stop", minutes: 2, why: "for an emergency stop",
     text: s => `Pull up on the left on ${s.street}. When you drive on, your supervisor checks it's clear behind, then says "Stop". Stop as quickly as you safely can.` },
 };
 
@@ -794,30 +847,35 @@ function refresh(table) {
   return table;
 }
 
-// Ask the planner for the times between some of the places in the table (by their positions in it)
+// Ask the planner for the times between some of the places in the table (by their positions in it).
+// It gives at most 100 times a request, so more than 10 places take more than one.
 async function askTimes(table, which) {
   if (!which.some(i => which.some(j => i !== j && table.real[i][j] == null))) return;  // known already
   const places = which.map(i => ({ lat: coord(table.points[i].navLat), lon: coord(table.points[i].navLon) }));
-  let data;
-  try {
-    data = await askRouter("sources_to_targets", { sources: places, targets: places, costing: "auto" });
-  } catch (err) {
-    if (err.busy || err.slow) throw err;
-    logPlanner(`sources_to_targets failed, so drive times are estimated: ${err.message}`);
-    return;
-  }
-  const answer = data.sources_to_targets;
-  const keep = (a, b, t) => {
-    if (a < which.length && b < which.length && Number.isFinite(t)) table.real[which[a]][which[b]] = t;
-  };
-  if (Array.isArray(answer)) {
-    answer.forEach((row, a) => (row || []).forEach((cell, b) => {
-      if (cell) keep(cell.from_index ?? a, cell.to_index ?? b, cell.time);
-    }));
-  } else if (answer && Array.isArray(answer.durations)) {
-    answer.durations.forEach((row, a) => (row || []).forEach((t, b) => keep(a, b, t)));
-  } else {
-    logPlanner("sources_to_targets: the answer wasn't in a shape this page knows");
+  const rows = Math.max(1, Math.floor(TEST.matrixPairs / places.length));
+  for (let first = 0; first < places.length; first += rows) {
+    const sources = places.slice(first, first + rows);
+    let data;
+    try {
+      data = await askRouter("sources_to_targets", { sources, targets: places, costing: "auto" });
+    } catch (err) {
+      if (err.busy || err.slow) throw err;
+      logPlanner(`sources_to_targets failed, so drive times are estimated: ${err.message}`);
+      break;
+    }
+    const answer = data.sources_to_targets;
+    const keep = (a, b, t) => {
+      if (a < sources.length && b < places.length && Number.isFinite(t)) table.real[which[first + a]][which[b]] = t;
+    };
+    if (Array.isArray(answer)) {
+      answer.forEach((row, a) => (row || []).forEach((cell, b) => {
+        if (cell) keep(cell.from_index ?? a, cell.to_index ?? b, cell.time);
+      }));
+    } else if (answer && Array.isArray(answer.durations)) {
+      answer.durations.forEach((row, a) => (row || []).forEach((t, b) => keep(a, b, t)));
+    } else {
+      logPlanner("sources_to_targets: the answer wasn't in a shape this page knows");
+    }
   }
   refresh(table);
   logPlanner(`drive times: ${table.known} from the planner, the others estimated at ` +
@@ -991,17 +1049,36 @@ async function routeFor(pick, uphill = true, end = state.origin) {
   }
   locations.push({ lat: coord(end.lat), lon: coord(end.lon), type: "break" });
   const data = await askRouter("route", { locations, costing: "auto", units: "miles", language: "en-US" });
+  return legsFrom(data, pick.order.filter(p => !p.via).length + 1);
+}
+
+// What the page needs from each leg of a route: time, distance, the line, and the directions, with where
+// each one happens along the line
+function legsFrom(data, expected) {
   const legs = data.trip && data.trip.legs;
-  if (!Array.isArray(legs) || legs.length !== pick.order.filter(p => !p.via).length + 1 ||
-      legs.some(leg => !leg.summary || typeof leg.shape !== "string")) {
+  if (!Array.isArray(legs) || legs.length !== expected || legs.some(leg => !leg.summary || typeof leg.shape !== "string")) {
     throw new RouterError("the route that came back didn't match the stops");
   }
-  return legs.map(leg => ({
-    seconds: leg.summary.time, miles: leg.summary.length,
-    line: decodeLine(leg.shape),
-    words: (leg.maneuvers || []).map(m => m.instruction).filter(Boolean),
-    roundabouts: (leg.maneuvers || []).filter(m => m.type === 26).length,  // 26 = entering a roundabout
-  }));
+  return legs.map(leg => {
+    const moves = (leg.maneuvers || []).map(m => ({
+      type: m.type, text: m.instruction || "",
+      // the planner sometimes adds the next direction ("Then, in 600 feet, ..."): that's said when it comes
+      say: (m.verbal_pre_transition_instruction || m.instruction || "").replace(/\.\s+Then\b[\s\S]*$/, "."),
+      begin: m.begin_shape_index || 0, exits: m.roundabout_exit_count || 0,
+      street: (m.street_names || m.begin_street_names || [])[0] || "",
+    }));
+    // a roundabout's exit road is on the direction that leaves it
+    moves.forEach((m, k) => {
+      if (m.type !== 26 || m.street) return;
+      const out = moves.slice(k + 1).find(x => x.type === 27);
+      if (out) m.street = out.street;
+    });
+    return {
+      seconds: leg.summary.time, miles: leg.summary.length, line: decodeLine(leg.shape), moves,
+      words: moves.map(m => m.text).filter(Boolean),
+      roundabouts: moves.filter(m => m.type === 26).length,  // 26 = entering a roundabout
+    };
+  });
 }
 
 // Ask for the route. If the planner can't make it, try again with other spots (after two refusals,
@@ -1144,6 +1221,7 @@ function renderTest() {
       el("p", { className: "summary-time" }, `About ${r.pick.minutes} minutes, ${miles.toFixed(1)} miles`),
       includes ? el("p", { className: "why" }, includes) : null,
       ...r.plan.notes.map(n => el("p", { className: "note" }, n)))));
+  list.append(el("section", { className: "group" }, startButton(() => driveTest(r))));
 
   // Roundabouts to pass through on each leg, for the Google Maps links
   const legVias = [[]];
@@ -1166,7 +1244,7 @@ function renderTest() {
     el("button", { className: "btn", type: "button", onclick: () => buildTest() }, "Build another")));
   list.append(section);
   setStatus(`Your mock test is ready: about ${r.pick.minutes} minutes from ${where(o)}.`);
-  drawTest(r);
+  drawRoute(r);
 }
 
 function setUpTestOptions() {
@@ -1195,19 +1273,18 @@ function offLine(a, b, p) {
   return Math.hypot(px - t * bx, py - t * by);
 }
 
-// Spots near the way for each thing to practise, best first: those adding the least distance, with the
-// ones in "avoid" (used last time) after the rest. The planner gives times for 10 places a request: the
-// start, the end and up to 8 spots. Things to practise on the same kind of spot share its candidates.
-function planTrip(avoid = new Set()) {
+// Spots near the way for each thing to practise, best first: those adding the least distance. The table
+// has the start, the end and up to 12 spots. Things to practise on the same kind of spot share candidates.
+function planTrip() {
   const a = state.origin, b = state.trip.dest, notes = [], items = [];
   const straight = milesBetween(a, b);
   const width = Math.min(TRIP.maxMiles, Math.max(TRIP.minMiles, straight * TRIP.corridor));
   const chosen = Object.keys(ACTIVITIES).filter(type => state.trip.activities.has(type));
-  const per = Math.max(1, Math.floor((TEST.matrixPlaces - 2) / chosen.length));
+  const per = Math.max(1, Math.min(6, Math.floor((TRIP.places - 2) / chosen.length)));
   for (const kind of new Set(chosen.map(type => ACTIVITIES[type].kind))) {
     const types = chosen.filter(type => ACTIVITIES[type].kind === kind);
     const options = state.spots.filter(s => s.kind === kind && offLine(a, b, s) <= width)
-      .map(s => ({ s, cost: milesBetween(a, s) + milesBetween(s, b) - straight + (avoid.has(s.id) ? 1000 : 0) }))
+      .map(s => ({ s, cost: milesBetween(a, s) + milesBetween(s, b) - straight }))
       .sort((x, y) => x.cost - y.cost).slice(0, per * types.length).map(c => c.s);
     types.forEach((type, k) => {
       const task = ACTIVITIES[type];
@@ -1225,12 +1302,12 @@ function planTrip(avoid = new Set()) {
   return { items, notes };
 }
 
-// One spot for each thing to practise, in the order that makes the drive shortest.
-// Table positions: 0 is the start, 1 the end. Spots in "avoid" are used only if there's nothing else.
-function fitTrip(plan, index, table, avoid = new Set()) {
+// Every way to pick one spot for each thing to practise, each in the order that makes its drive
+// shortest, quickest first. Table positions: 0 is the start, 1 the end.
+function tripChoices(plan, index, table) {
   const uphill = plan.items.some(item => item.type === "hill_start") ? TEST.uphillExtra : 0;
   const guessCost = table.known ? 60 : 0;
-  let best = null;
+  const choices = [];
   const choose = (k, picked) => {
     if (k < plan.items.length) {
       for (const s of plan.items[k].options) {
@@ -1239,7 +1316,7 @@ function fitTrip(plan, index, table, avoid = new Set()) {
       return;
     }
     const at = picked.map(s => index.get(s.id));
-    const used = picked.filter(s => avoid.has(s.id)).length;
+    let best = null;
     for (const order of ordersOf(picked.length)) {
       let seconds = uphill, guesses = 0, from = 0;
       for (const to of [...order.map(j => at[j]), 1]) {  // then on to the end
@@ -1247,35 +1324,65 @@ function fitTrip(plan, index, table, avoid = new Set()) {
         if (table.guessed[from][to]) guesses += 1;
         from = to;
       }
-      const score = seconds + guessCost * guesses + 3600 * used;
+      const score = seconds + guessCost * guesses;
       if (!best || score < best.score) {
         best = { score, seconds, order: order.map(j => ({ ...plan.items[j], spot: picked[j] })) };
       }
     }
+    choices.push(best);
   };
   choose(0, []);
-  return best;
+  return choices.sort((x, y) => x.score - y.score);
 }
 
-// Ask for the route, and if the planner can't make it, try again with other spots
-// (after two refusals, without asking to arrive uphill)
-async function routeTrip(plan, index, table, avoid) {
-  const tried = new Set(avoid);
+// Up to three good routes that differ as much as they can: first ones sharing no spots with any already
+// picked, then ones sharing at most half, then any that aren't the same spots again. None takes much
+// longer than the quickest.
+function differentChoices(choices) {
+  if (!choices.length) return [];
+  const limit = choices[0].seconds + Math.max(TRIP.slack, 0.4 * choices[0].seconds);
+  const spotsOf = c => new Set(c.order.map(stop => stop.spot.id));
+  const picked = [choices[0]];
+  for (const most of [() => 0, size => Math.floor(size / 2), size => size - 1]) {
+    for (const c of choices) {
+      if (picked.length >= TRIP.options) break;
+      if (picked.includes(c) || c.seconds > limit) continue;
+      const mine = spotsOf(c);
+      if (picked.every(p => [...spotsOf(p)].filter(id => mine.has(id)).length <= most(mine.size))) picked.push(c);
+    }
+  }
+  return picked;
+}
+
+// Ask for each route in turn, leaving out any the planner can't make. If it can't make any, try the
+// quickest once more without asking to arrive uphill.
+async function routeChoices(picks) {
+  const routed = [];
   let problem = null;
-  for (let attempt = 1; attempt <= TEST.attempts; attempt++) {
-    const pick = fitTrip(plan, index, table, tried);
+  for (const [k, pick] of picks.entries()) {
+    setStatus(picks.length > 1 ? `Working out route ${k + 1} of ${picks.length}...` : "Working out the route...");
     try {
-      return { pick, legs: await routeFor(pick, !problem || attempt < TEST.attempts, state.trip.dest) };
+      routed.push({ pick, legs: await routeFor(pick, true, state.trip.dest) });
+    } catch (err) {
+      if (stopTrying(err)) {
+        if (routed.length) break;
+        throw err;
+      }
+      problem = err;
+    }
+  }
+  if (!routed.length && picks.some(pick => pick.order.some(stop => stop.type === "hill_start"))) {
+    try {
+      routed.push({ pick: picks[0], legs: await routeFor(picks[0], false, state.trip.dest) });
     } catch (err) {
       if (stopTrying(err)) throw err;
       problem = err;
-      for (const part of pick.order) tried.add(part.spot.id);
     }
   }
-  throw problem;
+  if (!routed.length) throw problem;
+  return routed;
 }
 
-// "Use other spots" calls this with no event, to avoid the spots the last route used
 async function buildTrip(event) {
   if (event) event.preventDefault();
   const button = $("plan"), t = state.trip;
@@ -1306,15 +1413,14 @@ async function buildTrip(event) {
         setStatus(`Couldn't find "${destText}". Try a full postcode, or the name of a town.`, true);
         return;
       }
-      Object.assign(t, { dest: place, destText, result: null, used: new Set() });
+      Object.assign(t, { dest: place, destText, result: null });
       $("dest").blur();
     }
     if (!t.activities.size) {
       setStatus("Choose at least one thing to practise on the way.", true);
       return;
     }
-    const avoid = event ? new Set() : t.used;
-    const plan = planTrip(avoid);
+    const plan = planTrip();
     if (!plan.items.length) {
       const areas = listOf([...new Set(state.spots.map(s => s.area).filter(Boolean))]);
       setStatus(`There are no practice spots near this route yet.${areas ? ` So far there are spots around ${areas}.` : ""}`, true);
@@ -1328,10 +1434,7 @@ async function buildTrip(event) {
     const index = new Map(points.map((p, i) => [p.id, i]));
     const table = tableFor(points);
     await askTimes(table, points.map((_, i) => i));
-    setStatus("Working out the route...");
-    const { pick, legs } = await routeTrip(plan, index, table, avoid);
-    const stopped = pick.order.reduce((sum, stop) => sum + stop.minutes, 0);
-    const driving = legs.reduce((sum, leg) => sum + leg.seconds, 0);
+    const routed = await routeChoices(differentChoices(tripChoices(plan, index, table)));
     // The straight drive, to compare: the table has it unless the journey is long, so ask then
     let direct = table.real[0][1];
     if (direct == null) {
@@ -1344,12 +1447,13 @@ async function buildTrip(event) {
         direct = null;  // the comparison is left out
       }
     }
-    t.result = {
-      plan, pick, legs,
-      minutes: Math.round(driving * TEST.slowdown / 60 + stopped),
-      direct: direct == null ? null : Math.round(direct * TEST.slowdown / 60),
-    };
-    t.used = new Set(pick.order.map(stop => stop.spot.id));
+    const options = routed.map(({ pick, legs }) => ({
+      pick, legs,
+      minutes: Math.round(legs.reduce((sum, leg) => sum + leg.seconds, 0) * TEST.slowdown / 60 +
+                          pick.order.reduce((sum, stop) => sum + stop.minutes, 0)),
+      miles: legs.reduce((sum, leg) => sum + leg.miles, 0),
+    })).sort((x, y) => x.minutes - y.minutes);
+    t.result = { plan, options, chosen: 0, direct: direct == null ? null : Math.round(direct * TEST.slowdown / 60) };
     renderTrip();
     scrollTo("map");
   } catch (err) {
@@ -1374,40 +1478,58 @@ function renderTrip() {
                 : "Use your location, or search for a postcode or town, to choose where you're starting from.");
     return;
   }
-  const stops = r.pick.order;
-  const miles = r.legs.reduce((sum, leg) => sum + leg.miles, 0);
-  const roundabouts = r.legs.reduce((sum, leg) => sum + leg.roundabouts, 0);
-  const parts = stops.map(stop => stop.name.toLowerCase());
-  if (roundabouts) parts.push(`${roundabouts} roundabout${roundabouts === 1 ? "" : "s"}`);
-  const extra = r.direct == null ? null : r.minutes - r.direct;
-  const compared = extra == null ? null : extra >= 2
-    ? `That's about ${formatDuration(extra)} longer than driving straight there, practice included.`
-    : "That's about as long as driving straight there.";
+  const many = r.options.length > 1;
   list.append(el("section", { className: "group" },
     el("article", { className: "sign summary" },
-      el("h2", { className: "summary-title" }, `Your route to ${t.dest.label}`),
-      el("p", { className: "summary-time" }, `About ${formatDuration(r.minutes)}, ${miles.toFixed(1)} miles`),
-      compared ? el("p", { className: "why" }, compared) : null,
-      el("p", { className: "why" }, `${sentence(listOf(parts))}.`),
-      ...r.plan.notes.map(n => el("p", { className: "note" }, n)))));
-  const section = el("section", { className: "group" });
+      el("h2", { className: "summary-title" }, many ? `${r.options.length} routes to ${t.dest.label}` : `Your route to ${t.dest.label}`),
+      r.direct != null ? el("p", { className: "why" }, `Driving straight there takes about ${formatDuration(r.direct)}.`) : null,
+      many ? el("p", { className: "why" }, "Each one stops at different spots. Choose one to see its stops.") : null,
+      ...r.plan.notes.map(n => el("p", { className: "note" }, n))),
+    el("div", { className: "choices", role: "group", "aria-label": "Routes" }, ...r.options.map((option, k) => choiceCard(option, k)))));
+
+  const chosen = r.options[r.chosen], stops = chosen.pick.order;
+  const section = el("section", { className: "group" },
+    el("h2", { className: "group-title" }, many ? `Route ${r.chosen + 1}` : "The stops"),
+    startButton(() => driveTrip(chosen)));
   stops.forEach((stop, i) => {
     const s = stop.spot;
-    section.append(stopCard(i + 1, s.street, stop.name, stop.text(s), r.legs[i], s, [], [
+    section.append(stopCard(i + 1, s.street, stop.name, stop.text(s), chosen.legs[i], s, [], [
       s.note ? el("p", { className: "note" }, s.note) : null,
       s.nearSchool ? el("p", { className: "warn" }, "Near a school: avoid school-run times") : null,
     ]));
   });
-  const arrive = stopCard("B", `Arrive at ${t.dest.label}`, "", "", r.legs[stops.length],
+  const arrive = stopCard("B", `Arrive at ${t.dest.label}`, "", "", chosen.legs[stops.length],
                           { navLat: t.dest.lat, navLon: t.dest.lon }, []);
   arrive.querySelector(".badge").classList.add("badge-end");  // like the B on the map
   arrive.querySelector(".stop-name .visually-hidden").textContent = "End: ";
   section.append(arrive);
-  section.append(el("div", { className: "rebuild" },
-    el("button", { className: "btn", type: "button", onclick: () => buildTrip() }, "Use other spots")));
   list.append(section);
-  setStatus(`Your route is ready: about ${formatDuration(r.minutes)} from ${where(o)} to ${t.dest.label}.`);
-  drawTest(r, t.dest);
+  setStatus(many ? `${r.options.length} routes from ${where(o)} to ${t.dest.label}. Route ${r.chosen + 1} is shown.`
+                 : `Your route is ready: about ${formatDuration(chosen.minutes)} from ${where(o)} to ${t.dest.label}.`);
+  drawRoute(chosen, { end: t.dest, others: r.options.filter(x => x !== chosen),
+                      choose: other => chooseRoute(r.options.indexOf(other)) });
+}
+
+// One of the routes to choose from: its time, how much longer than driving straight there, and its stops
+function choiceCard(option, k) {
+  const r = state.trip.result, chosen = k === r.chosen;
+  const extra = r.direct == null ? null : option.minutes - r.direct;
+  const compared = extra == null ? "" : extra >= 2
+    ? `, ${formatDuration(extra)} longer than driving straight there` : ", about as long as driving straight there";
+  const stops = option.pick.order.map(stop => `${stop.name.toLowerCase()} on ${stop.spot.street}`);
+  return el("button", { className: "choice-card", type: "button", "aria-pressed": String(chosen),
+                        onclick: () => chooseRoute(k) },
+    el("span", { className: "choice-title" }, `Route ${k + 1}: about ${formatDuration(option.minutes)}`),
+    el("span", { className: "choice-line" }, `${option.miles.toFixed(1)} miles${compared}.`),
+    el("span", { className: "choice-line" }, `${sentence(listOf(stops))}.`),
+    chosen ? el("span", { className: "choice-shown" }, "Shown below and on the map") : null);
+}
+
+function chooseRoute(k) {
+  const r = state.trip.result;
+  if (!r || k < 0 || k === r.chosen) return;
+  r.chosen = k;
+  renderTrip();
 }
 
 function setUpTripOptions() {
@@ -1423,6 +1545,385 @@ function setUpTripOptions() {
     $("activities").append(b);
   }
   $("trip-options").addEventListener("submit", buildTrip);
+}
+
+// ---------- Driving: spoken directions along the route ----------
+// The page follows your location along the route, says each direction before you reach it, the way an
+// examiner would, and says what to do at each stop. A web page only runs while it's on screen, so it
+// keeps the screen on, and finds a new route if you leave this one.
+const DRIVE = {
+  offRoute: 45,        // metres from the route, three fixes running, before finding a new route
+  rerouteEvery: 20,    // seconds between new routes, at most
+  lookAhead: 600,      // metres ahead of where you were to look for where you are now
+  alertSeconds: 15,    // say what's coming about this many seconds before it, at your speed,
+  alertMin: 120,       // but no closer than this many metres
+  alertMax: 400,       // and no further
+  nowSeconds: 4,       // then say it again this close
+  nowMin: 25,
+  nowMax: 80,
+  arrive: 35,          // metres from a stop to count as there
+};
+let drive = null;
+const voice = { on: true, chosen: null };
+
+const metresBetween = (a, b) => milesBetween(a, b) * 1609.34;
+const lowerFirst = text => text ? text[0].toLowerCase() + text.slice(1) : "";
+const ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth"];
+
+// Distances the way UK satnavs say them, and shorter for the screen
+function spokenDistance(m) {
+  const yards = m * 1.0936;
+  if (yards < 550) return `${Math.max(50, Math.round(yards / 50) * 50)} yards`;
+  const miles = m / 1609.34;
+  if (miles < 0.375) return "a quarter of a mile";
+  if (miles < 0.625) return "half a mile";
+  if (miles < 0.875) return "three quarters of a mile";
+  const whole = Math.round(miles);
+  return `${whole} mile${whole === 1 ? "" : "s"}`;
+}
+function shownDistance(m) {
+  const yards = Math.max(0, m) * 1.0936;
+  return yards < 1000 ? `${Math.max(10, Math.round(yards / 10) * 10)} yd` : `${(m / 1609.34).toFixed(1)} mi`;
+}
+
+// What to say for one of the planner's directions. Roundabouts as examiners put them; the rest as the
+// planner words them ("Turn left onto Cheam Road.").
+function wordsFor(m) {
+  if (m.type === 26) {
+    const exit = m.exits ? `${ORDINALS[m.exits - 1] || `${m.exits}th`} exit` : "exit";
+    const onto = m.street ? ` onto ${m.street}` : "";
+    return { now: `At the roundabout, take the ${exit}${onto}.`, show: `Roundabout: take the ${exit}${onto}` };
+  }
+  const now = (m.say || m.text || "").trim();
+  return { now, show: now.replace(/\.$/, "") };
+}
+
+function pickVoice() {
+  if (!("speechSynthesis" in window)) return;
+  const voices = speechSynthesis.getVoices();
+  voice.chosen = voices.find(v => v.lang === "en-GB") || voices.find(v => /^en[-_]GB/i.test(v.lang)) ||
+                 voices.find(v => /^en/i.test(v.lang)) || null;
+}
+
+// "now": more pressing than whatever is being said, so that stops, unless it's what to do at a stop
+// ("keep"), which is never cut short
+function say(text, { now = false, keep = false } = {}) {
+  if (!text) return;
+  logPlanner(`said: ${text}`);
+  if (!voice.on || !("speechSynthesis" in window)) return;
+  if (now && !voice.keeping) speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "en-GB";
+  if (voice.chosen) u.voice = voice.chosen;
+  if (keep) {
+    voice.keeping = true;
+    u.onend = u.onerror = () => { voice.keeping = false; };
+  }
+  speechSynthesis.speak(u);
+}
+
+async function keepScreenOn() {
+  if (!drive || !navigator.wakeLock) return;
+  try { drive.wake = await navigator.wakeLock.request("screen"); } catch (err) { drive.wake = null; }
+}
+
+function startButton(onclick) {
+  return el("div", {},
+    el("button", { className: "btn btn-go start", type: "button", onclick }, "Start driving"),
+    el("p", { className: "start-note" }, "Spoken directions all the way. Put the phone in a holder first, and keep this page open."));
+}
+
+// One stop, as the directions need it: what to say on the way and on arriving, and where it is
+function driveStop(part) {
+  const s = part.spot;
+  return {
+    name: part.name, street: s.street, task: `${part.name}. ${part.text(s)}`, show: `${part.name}: ${s.street}`,
+    ahead: `your next stop is ${s.street}, ${part.why}`,
+    at: { lat: s.navLat, lon: s.navLon, heading: part.type === "hill_start" ? s.heading : null },
+  };
+}
+
+function driveTest(r) {
+  const o = state.origin, stops = [], vias = [[]];
+  for (const part of r.pick.order) {
+    if (part.via) { vias[vias.length - 1].push(part.spot); continue; }
+    stops.push(driveStop(part));
+    vias.push([]);
+  }
+  stops.push({ final: true, home: true, show: "Back to the start", ahead: "you'll be back at the start",
+               arrived: "You're back at the start. That's the end of your mock test.", at: { lat: o.lat, lon: o.lon } });
+  startDriving({ legs: r.legs, stops, vias });
+}
+
+function driveTrip(option) {
+  const b = state.trip.dest;
+  const stops = option.pick.order.map(driveStop);
+  stops.push({ final: true, show: `Arrive at ${b.label}`, ahead: `you'll arrive at ${b.label}`,
+               arrived: `You've arrived at ${b.label}.`, at: { lat: b.lat, lon: b.lon } });
+  startDriving({ legs: option.legs, stops, vias: stops.map(() => []) });
+}
+
+// The route as one line, with the distance along it of every point, and what to say where
+function navRoute(legs, stops) {
+  const path = [], events = [];
+  legs.forEach((leg, i) => {
+    const at = [];  // where each point of this leg's line is in the path
+    leg.line.forEach(([lat, lon], k) => {
+      const last = path[path.length - 1];
+      if (k === 0 && last) { at.push(path.length - 1); return; }  // legs meet at a stop
+      path.push({ lat, lon, d: last ? last.d + metresBetween(last, { lat, lon }) : 0 });
+      at.push(path.length - 1);
+    });
+    if (!at.length) return;
+    for (const m of leg.moves || []) {
+      if ([4, 5, 6, 7, 8, 27].includes(m.type)) continue;  // arriving, carrying on, leaving a roundabout
+      const words = wordsFor(m);
+      if (!words.now) continue;
+      events.push({ d: path[at[Math.min(m.begin, at.length - 1)]].d, leg: i, words,
+                    kind: [1, 2, 3].includes(m.type) ? "start" : "turn" });
+    }
+    events.push({ d: path[at[at.length - 1]].d, leg: i, kind: "stop", stop: stops[i] });
+  });
+  const rank = { stop: 0, start: 1, turn: 2 };
+  events.sort((a, b) => a.d - b.d || rank[a.kind] - rank[b.kind]);
+  return { path, events };
+}
+
+function startDriving(trip) {
+  if (!("geolocation" in navigator) || !window.isSecureContext) {
+    setStatus("This browser can't share your location here, so spoken directions can't follow you.", true);
+    return;
+  }
+  if (drive) stopDriving();
+  drive = { ...trip, d: 0, off: 0, speed: 13, lastFix: null, watch: null, wake: null, me: null,
+            rerouting: false, lastReroute: 0, finished: false, note: "" };
+  drive.route = navRoute(drive.legs, drive.stops);
+  document.body.classList.add("driving");
+  $("drive").hidden = $("drive-bar").hidden = false;
+  if (map) map.invalidateSize();  // without the map, the directions still work
+  drawDrive();
+  pickVoice();
+  if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = pickVoice;
+  // the first words come straight from the tap: iPhones only speak after one
+  const first = drive.route.events.find(e => e.kind === "start");
+  if (first) first.done = true;
+  say(`Starting. ${first ? first.words.now : ""}`.trim(), { now: true });
+  drive.note = "Keep this page open with the screen on.";
+  showDrive();
+  keepScreenOn();
+  drive.watch = navigator.geolocation.watchPosition(onFix, onFixError,
+                                                    { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
+}
+
+function onFixError(err) {
+  if (!drive) return;
+  if (err.code === 1) {
+    drive.note = "Location is off for this page, so directions can't follow you. Turn it on, then tap Start driving again.";
+    showDrive();
+  }
+}
+
+function onFix(pos) {
+  if (!drive || drive.finished) return;
+  const { latitude: lat, longitude: lon, accuracy, speed, heading } = pos.coords;
+  const here = { lat, lon }, now = pos.timestamp || Date.now();
+  if (drive.lastFix) {
+    const seconds = (now - drive.lastFix.t) / 1000;
+    if (speed != null && speed >= 0) drive.speed = speed;
+    else if (seconds >= 0.5) drive.speed = Math.min(40, metresBetween(drive.lastFix, here) / seconds);
+  }
+  drive.lastFix = { ...here, t: now };
+  if (drive.me) drive.me.setLatLng([lat, lon]);
+  if (map) map.panTo([lat, lon], { animate: false });
+  const spot = whereOnRoute(here);
+  if (spot.off > DRIVE.offRoute && (accuracy == null || accuracy <= 50)) {
+    drive.off += 1;
+    if (drive.off >= 3) reroute(here, heading);
+  } else {
+    drive.off = 0;
+    drive.d = Math.max(drive.d, spot.d);
+    speakAhead();
+  }
+  showDrive();
+}
+
+// The nearest point of the route to here, looking from just behind where you were to a little ahead,
+// so a route that comes back along the same road doesn't make you jump ahead
+function whereOnRoute(here) {
+  const path = drive.route.path, k = Math.cos(here.lat * Math.PI / 180);
+  const xy = p => [(p.lon - here.lon) * 111320 * k, (p.lat - here.lat) * 110540];  // metres from here
+  let best = { off: Infinity, d: drive.d, score: Infinity };
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1], b = path[i];
+    if (b.d < drive.d - 50) continue;
+    if (a.d > drive.d + DRIVE.lookAhead) break;
+    const [ax, ay] = xy(a), [bx, by] = xy(b);
+    const dx = bx - ax, dy = by - ay, length2 = dx * dx + dy * dy;
+    const t = length2 ? Math.min(1, Math.max(0, -(ax * dx + ay * dy) / length2)) : 0;
+    const off = Math.hypot(ax + t * dx, ay + t * dy), d = a.d + t * (b.d - a.d);
+    const score = off + 0.05 * Math.max(0, d - drive.d);
+    if (score < best.score) best = { off, d, score };
+  }
+  return best;
+}
+
+// Say what's coming next, once ahead of it and again on reaching it. Not past a stop.
+function speakAhead() {
+  const v = Math.max(5, drive.speed || 13);
+  const alertAt = Math.min(DRIVE.alertMax, Math.max(DRIVE.alertMin, v * DRIVE.alertSeconds));
+  const nowAt = Math.min(DRIVE.nowMax, Math.max(DRIVE.nowMin, v * DRIVE.nowSeconds));
+  for (const e of drive.route.events) {
+    if (e.done) continue;
+    const gap = e.d - drive.d;
+    if (e.kind === "stop") {
+      if (gap <= DRIVE.arrive) { arriveAt(e); if (drive.finished) return; continue; }
+      if (!e.alerted && gap <= alertAt) { e.alerted = true; say(`In ${spokenDistance(gap)}, ${e.stop.ahead}.`); }
+      return;
+    }
+    if (gap < -20) { e.done = true; continue; }  // already past it
+    if (gap > alertAt) return;
+    if (gap <= nowAt) { e.done = true; say(e.words.now, { now: true }); continue; }
+    if (!e.alerted && gap > nowAt + 30) { e.alerted = true; say(`In ${spokenDistance(gap)}, ${lowerFirst(e.words.now)}`); }
+    return;
+  }
+}
+
+// Arriving at a stop: say what to do there, and which way to go after. Stops at the same place (two
+// things to practise on one street) are said together.
+function arriveAt(e) {
+  const together = [e];
+  for (const x of drive.route.events.slice(drive.route.events.indexOf(e) + 1)) {
+    if (x.d - e.d > DRIVE.arrive) break;
+    if (x.kind === "stop" && !x.done) together.push(x);
+  }
+  const last = together[together.length - 1];
+  // anything said on the way between them is no drive at all
+  for (const x of drive.route.events) {
+    if (together.includes(x) || (x.leg > e.leg && x.leg <= last.leg)) x.done = true;
+  }
+  const tasks = together.filter(x => !x.stop.final).map((x, k) => (k ? `Then, ${lowerFirst(x.stop.task)}` : x.stop.task));
+  if (last.stop.final) {
+    say([...tasks, last.stop.arrived].join(" "), { now: true, keep: true });
+    finishDriving();
+    return;
+  }
+  const next = drive.route.events.find(x => x.kind === "start" && x.leg === last.leg + 1 && !x.done);
+  if (next) next.done = true;
+  say(`${tasks.join(" ")}${next ? ` When you've finished, ${lowerFirst(next.words.now)}` : ""}`, { now: true, keep: true });
+}
+
+// Off the route: a new one from here to the stops still to come (on this leg, the places to pass
+// through are left out)
+async function reroute(here, heading) {
+  if (drive.rerouting || Date.now() - drive.lastReroute < DRIVE.rerouteEvery * 1000) return;
+  drive.rerouting = true;
+  drive.lastReroute = Date.now();
+  say("Finding a new route.", { now: true });
+  drive.note = "Finding a new route...";
+  showDrive();
+  const trip = drive;
+  const next = trip.route.events.find(e => e.kind === "stop" && !e.done);
+  const from = next ? next.leg : trip.stops.length - 1;
+  const stops = trip.stops.slice(from), vias = trip.vias.slice(from).map((list, k) => (k ? list : []));
+  const locations = [{ lat: coord(here.lat), lon: coord(here.lon), type: "break" }];
+  if (Number.isFinite(heading) && trip.speed > 3) Object.assign(locations[0], { heading: Math.round(heading) % 360, heading_tolerance: 45 });
+  stops.forEach((stop, k) => {
+    for (const v of vias[k]) locations.push({ lat: coord(v.navLat), lon: coord(v.navLon), type: "through" });
+    const loc = { lat: coord(stop.at.lat), lon: coord(stop.at.lon), type: "break" };
+    if (stop.at.heading != null) Object.assign(loc, { heading: Math.round(stop.at.heading) % 360, heading_tolerance: 60 });
+    locations.push(loc);
+  });
+  try {
+    const data = await askRouter("route", { locations, costing: "auto", units: "miles", language: "en-US" });
+    if (drive !== trip) return;  // ended meanwhile
+    const legs = legsFrom(data, stops.length);
+    Object.assign(trip, { legs, stops, vias, d: 0, off: 0, note: "" });
+    trip.route = navRoute(legs, stops);
+    const first = trip.route.events.find(e => e.kind === "start");
+    if (first) { first.done = true; say(first.words.now); }
+    drawDrive();
+  } catch (err) {
+    if (drive !== trip) return;
+    trip.note = "Couldn't find a new route. Head back to the blue line when it's safe.";
+    say(trip.note);
+  } finally {
+    trip.rerouting = false;
+    if (drive === trip) showDrive();
+  }
+}
+
+function showDrive() {
+  if (!drive) return;
+  const ahead = drive.route.events.find(e => !e.done && e.kind !== "start");
+  if (drive.finished || !ahead) {
+    $("drive-dist").textContent = "";
+    $("drive-text").textContent = drive.finished ? drive.stops[drive.stops.length - 1].arrived : "";
+    $("drive-next").textContent = drive.finished ? "Tap End to see the route again." : drive.note;
+    return;
+  }
+  $("drive-dist").textContent = shownDistance(ahead.d - drive.d);
+  $("drive-text").textContent = ahead.kind === "stop" ? ahead.stop.show : ahead.words.show;
+  const stop = drive.route.events.find(e => e.kind === "stop" && !e.done);
+  $("drive-next").textContent = drive.note ||
+    (stop && stop !== ahead ? `Then ${lowerFirst(stop.stop.show)}, ${shownDistance(stop.d - drive.d)}` : "");
+  if (drive.note && drive.lastFix && drive.d > 30 && !drive.rerouting) drive.note = "";  // shown once moving
+}
+
+function drawDrive() {
+  if (!map) return;
+  layer.clearLayers();
+  markers.clear();
+  const points = [];
+  for (const leg of drive.legs) {
+    L.polyline(leg.line, { color: "#FFFFFF", weight: 12, opacity: 0.9, interactive: false }).addTo(layer);
+    L.polyline(leg.line, { color: "#0B57A4", weight: 7, interactive: false }).addTo(layer);
+    points.push(...leg.line);
+  }
+  drive.stops.forEach((stop, k) => {
+    const html = !stop.final ? `<span class="num">${k + 1}</span>`
+               : stop.home ? '<span class="finish"></span>' : '<span class="end">B</span>';
+    L.marker([stop.at.lat, stop.at.lon], { icon: L.divIcon({ className: "", html, iconSize: [30, 30] }),
+                                           interactive: false, keyboard: false }).addTo(layer);
+  });
+  drive.me = L.marker(drive.lastFix ? [drive.lastFix.lat, drive.lastFix.lon] : points[0] || [state.origin.lat, state.origin.lon], {
+    icon: L.divIcon({ className: "", html: '<span class="me"></span>', iconSize: [26, 26] }),
+    interactive: false, keyboard: false, zIndexOffset: 1000,
+  }).addTo(layer);
+  map.setView(drive.me.getLatLng(), 17, { animate: false });
+}
+
+function finishDriving() {
+  drive.finished = true;
+  if (drive.watch != null) navigator.geolocation.clearWatch(drive.watch);
+  drive.watch = null;
+  if (drive.wake) drive.wake.release().catch(() => {});
+  drive.wake = null;
+  showDrive();
+}
+
+function stopDriving() {
+  if (!drive) return;
+  if (drive.watch != null) navigator.geolocation.clearWatch(drive.watch);
+  if (drive.wake) drive.wake.release().catch(() => {});
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  drive = null;
+  document.body.classList.remove("driving");
+  $("drive").hidden = $("drive-bar").hidden = true;
+  if (map) map.invalidateSize();
+  render();
+}
+
+function setUpDriving() {
+  $("end").addEventListener("click", stopDriving);
+  $("mute").addEventListener("click", () => {
+    voice.on = !voice.on;
+    $("mute").setAttribute("aria-pressed", String(!voice.on));
+    $("mute").textContent = voice.on ? "Mute" : "Unmute";
+    if (!voice.on && "speechSynthesis" in window) speechSynthesis.cancel();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (drive && !drive.finished && document.visibilityState === "visible") keepScreenOn();
+  });
 }
 
 // ---------- The map ----------
@@ -1487,11 +1988,21 @@ function drawMarkers(spots, origin) {
   fit(points);
 }
 
-function drawTest(r, end = null) {
+// A route on the map: its line, the start, the numbered stops and the places it passes through, and the
+// end of an A to B route. Other routes to choose from are drawn grey underneath; tapping one chooses it.
+function drawRoute(r, { end = null, others = [], choose = null } = {}) {
   if (!map) return;
   layer.clearLayers();
   markers.clear();
   const points = [];
+  for (const other of others) {
+    for (const leg of other.legs) {
+      L.polyline(leg.line, { color: "#FFFFFF", weight: 9, opacity: 0.9, interactive: false }).addTo(layer);
+      L.polyline(leg.line, { color: "#7C848C", weight: 5, interactive: false }).addTo(layer);
+      if (choose) L.polyline(leg.line, { opacity: 0, weight: 26 }).on("click", () => choose(other)).addTo(layer);
+      points.push(...leg.line);
+    }
+  }
   for (const leg of r.legs) {
     L.polyline(leg.line, { color: "#FFFFFF", weight: 10, opacity: 0.9, interactive: false }).addTo(layer);
     L.polyline(leg.line, { color: "#0B57A4", weight: 5, interactive: false }).addTo(layer);
@@ -1537,6 +2048,7 @@ async function start() {
   buildKindButtons();
   setUpTestOptions();
   setUpTripOptions();
+  setUpDriving();
   setUpMap();
   for (const b of document.querySelectorAll(".mode")) b.addEventListener("click", () => setMode(b.dataset.mode));
   $("locate").addEventListener("click", locate);
