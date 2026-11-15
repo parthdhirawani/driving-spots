@@ -224,6 +224,46 @@
   }
   @media (prefers-reduced-motion: reduce) { .heading { transition: none; } }
   .hint { margin: 0; color: var(--kerb); }
+
+  /* Like the real test: options, the checks before you drive, and the marking sheet */
+  .real { display: grid; gap: 0; }
+  .real .hint { margin: -6px 0 4px 34px; font-size: 15px; }
+  .reveal { margin-top: 12px; }
+  .step-title { margin: 0; font-size: 22px; line-height: 1.15; }
+  .step-count { margin: 0 0 4px; color: var(--kerb); font-size: 15px; }
+  .question { margin: 10px 0 0; font-size: 20px; font-weight: 700; line-height: 1.3; }
+  .answer { margin: 12px 0 0; padding: 10px 12px; background: var(--pavement); border-left: 6px solid var(--black); border-radius: 6px; }
+  .answer p { margin: 0; }
+  .answer .answer-label { font-weight: 700; font-size: 15px; }
+  .result { position: sticky; top: 8px; z-index: 5; margin: 12px 0; padding: 14px 16px; border-radius: 12px; color: var(--white); }
+  .result.pass { background: var(--blue); }
+  .result.fail { background: var(--red); }
+  .result-title { margin: 0; font-size: 30px; font-weight: 700; line-height: 1.1; }
+  .result-why { margin: 4px 0 0; }
+  .mark { border-top: 2px solid var(--black); }
+  .mark:last-of-type { border-bottom: 2px solid var(--black); }
+  .mark summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 52px;
+    font-weight: 700; cursor: pointer; list-style: none;
+  }
+  .mark summary::-webkit-details-marker { display: none; }
+  .mark summary::after { content: "+"; font-size: 24px; width: 1em; text-align: center; }
+  .mark[open] summary::after { content: "\2212"; }
+  .tally { margin-left: auto; padding: 2px 10px; border-radius: 999px; background: var(--black); color: var(--white); font-size: 15px; }
+  .tally.serious, .tally.dangerous { background: var(--red); }
+  .tally:empty { display: none; }
+  .mark-row { padding: 8px 0 12px; }
+  .mark-row + .mark-row { border-top: 1px solid #C9CDD1; }
+  .mark-name { margin: 0 0 6px; }
+  .mark-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .mark-controls .count { min-width: 2.2em; text-align: center; font-weight: 700; font-size: 20px; }
+  .mark-btn {
+    min-width: 44px; min-height: 44px; padding: 0 10px; font: inherit; font-weight: 700; color: var(--black);
+    background: var(--white); border: 2px solid var(--black); border-radius: 10px; cursor: pointer;
+  }
+  .mark-btn.sign-s, .mark-btn.sign-d { font-size: 15px; }
+  .mark-btn[aria-pressed="true"] { background: var(--black); color: var(--white); }
+  .mark-btn.sign-s[aria-pressed="true"], .mark-btn.sign-d[aria-pressed="true"] { background: var(--red); border-color: var(--red); }
   .log-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
   .log-tools .btn { min-height: 44px; padding: 0 16px; }
   .drive-bar .btn[aria-pressed="true"] { background: var(--black); color: var(--white); }
@@ -309,11 +349,12 @@
   </header>
   <div id="kinds" class="kinds" role="group" aria-label="Type of spot"></div>
   <form id="test-options" class="options" aria-label="Mock test options" hidden>
-    <div class="option">
+    <div class="option stack">
       <span class="option-name" id="length-name">Length</span>
       <div class="choice" role="group" aria-labelledby="length-name">
         <button class="kind" type="button" data-minutes="30" aria-pressed="false">30 min</button>
-        <button class="kind" type="button" data-minutes="40" aria-pressed="true">40 min</button>
+        <button class="kind" type="button" data-minutes="35" aria-pressed="true">35 min</button>
+        <button class="kind" type="button" data-minutes="40" aria-pressed="false">40 min</button>
       </div>
     </div>
     <label class="option">
@@ -337,6 +378,12 @@
     <div class="ticks">
       <label class="tick"><input id="hill" type="checkbox" checked> Hill start</label>
       <label class="tick"><input id="roundabouts" type="checkbox" checked> Roundabouts</label>
+    </div>
+    <div class="real">
+      <label class="tick"><input id="real-test" type="checkbox"> Like the real test</label>
+      <p class="hint">An eyesight check and a 'tell me' question first, a 'show me' question on the move, normal
+         stops and an examiner's instructions, then a marking sheet.</p>
+      <label class="tick" id="show-route-tick"><input id="show-route" type="checkbox"> Show me the route first</label>
     </div>
     <button id="build" class="btn btn-go" type="submit">Build my test</button>
   </form>
@@ -379,6 +426,8 @@
     <p>Mock tests and A to B routes are made up from the spots here, not real test routes. Driving times
        are estimates. Distances in the spot list are in a straight line, and spots are picked from
        OpenStreetMap data, so treat them as suggestions.</p>
+    <p>Test wording and the 'show me, tell me' questions are adapted from DVSA guidance on GOV.UK, under the
+       <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/">Open Government Licence</a>.</p>
     <p>Map &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors.
        Postcode and town search by <a href="https://postcodes.io">postcodes.io</a>. Routes by
        <a href="https://github.com/valhalla/valhalla">Valhalla</a>, on a free server run by
@@ -434,7 +483,7 @@ const DEBUG = location.hash === "#debug";  // the log, whatever the settings say
 
 // Settings, kept on this phone
 const SETTINGS_KEY = "driving-practice-settings";
-const settings = { repick: true, log: false, ...loadSettings() };
+const settings = { repick: true, log: false, realTest: true, showRoute: false, ...loadSettings() };
 function loadSettings() {
   try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"); } catch (err) { return {}; }
 }
@@ -503,7 +552,7 @@ const REDUCED_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").mat
 
 const state = {
   spots: [], roundabouts: [], origin: null, originText: "", kind: "all", mode: "spots", result: null,
-  test: { minutes: 40, manoeuvre: "surprise", emergency: "real", hill: true, roundabouts: true },
+  test: { minutes: 35, manoeuvre: "surprise", emergency: "real", hill: true, roundabouts: true },
   trip: { activities: new Set(["parallel_park", "hill_start"]), dest: null, destText: "", result: null, used: new Set() },
 };
 const $ = id => document.getElementById(id);
@@ -1078,7 +1127,8 @@ function planTest() {
 // as asked. Spots in "avoid" were in a route the planner couldn't make, so others are used where there's
 // a choice. "scale" allows for routes coming out longer or shorter than the table says.
 function fitLength(plan, index, table, { avoid = new Set(), scale = 1, tries = TEST.tries } = {}) {
-  const minutesStopped = plan.items.reduce((sum, item) => sum + item.minutes, 0);
+  const minutesStopped = plan.items.reduce((sum, item) => sum + item.minutes, 0) +
+                         (settings.realTest ? REAL.normalStops * REAL.stopMinutes : 0);
   const target = Math.max(5, state.test.minutes - minutesStopped) * 60 / TEST.slowdown;
   const fresh = list => {
     const left = list.filter(s => !avoid.has(s.id));
@@ -1275,7 +1325,7 @@ async function buildTest(event) {
       plan.notes.push(`There aren't enough practice spots${state.test.roundabouts ? " and roundabouts" : ""} within ` +
                       `${TEST.maxMiles} miles of here to make it ${state.test.minutes} minutes long.`);
     }
-    state.result = { plan, pick, legs };
+    state.result = { plan, pick, legs, real: settings.realTest, revealed: settings.showRoute };
     renderTest();
     scrollTo("map");
   } catch (err) {
@@ -1323,6 +1373,7 @@ function renderTest() {
                 : "Use your location, or search for a postcode or town, to choose where the test starts.");
     return;
   }
+  const hidden = r.real && !r.revealed;  // like the real test, where the route isn't known beforehand
   const stops = r.pick.order.filter(part => !part.via);
   const miles = r.legs.reduce((sum, leg) => sum + leg.miles, 0);
   const roundabouts = r.legs.reduce((sum, leg) => sum + leg.roundabouts, 0);
@@ -1330,13 +1381,23 @@ function renderTest() {
   if (roundabouts) parts.push(`${roundabouts} roundabout${roundabouts === 1 ? "" : "s"}`);
   const includes = parts.length ? sentence(parts.length > 1
     ? parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1] : parts[0]) + "." : "";
+  if (r.marking) list.append(markingSheet(r));
   list.append(el("section", { className: "group" },
     el("article", { className: "sign summary" },
-      el("h2", { className: "summary-title" }, "Your mock test"),
+      el("h2", { className: "summary-title" }, r.driven ? "The test you drove" : "Your mock test"),
       el("p", { className: "summary-time" }, `About ${r.pick.minutes} minutes, ${miles.toFixed(1)} miles`),
-      includes ? el("p", { className: "why" }, includes) : null,
-      ...r.plan.notes.map(n => el("p", { className: "note" }, n)))));
-  list.append(el("section", { className: "group" }, startButton(() => driveTest(r))));
+      hidden ? el("p", { className: "why" }, "The route, the manoeuvre and whether there's an emergency stop are a " +
+                                             "surprise, like the real test.")
+             : includes ? el("p", { className: "why" }, includes) : null,
+      ...(hidden ? [] : r.plan.notes.map(n => el("p", { className: "note" }, n))),
+      hidden ? el("button", { className: "btn reveal", type: "button",
+                              onclick: () => { r.revealed = true; renderTest(); } }, "Show the route") : null)));
+  list.append(el("section", { className: "group", id: "start-test" }, r.real ? beforeYouDrive(r) : startButton(() => driveTest(r))));
+  if (hidden) {
+    drawMarkers([], o);
+    setStatus(`Your mock test is ready: about ${r.pick.minutes} minutes from ${where(o)}.`);
+    return;
+  }
 
   // Roundabouts to pass through on each leg, for the Google Maps links
   const legVias = [[]];
@@ -1358,8 +1419,61 @@ function renderTest() {
   section.append(el("div", { className: "rebuild" },
     el("button", { className: "btn", type: "button", onclick: () => buildTest() }, "Build another")));
   list.append(section);
-  setStatus(`Your mock test is ready: about ${r.pick.minutes} minutes from ${where(o)}.`);
+  setStatus(r.marking ? "Mark the drive, then build another test when you're ready."
+                      : `Your mock test is ready: about ${r.pick.minutes} minutes from ${where(o)}.`);
   drawRoute(r);
+}
+
+// ---------- Like the real test: before you drive ----------
+// As on the real test: an eyesight check, then a 'tell me' question, while parked. The supervisor sees
+// a good answer and says whether it was right; both go on the marking sheet.
+function beforeYouDrive(r) {
+  const b = r.before;
+  if (!b || r.driven) {
+    return startButton(() => beginTest(r), "Start the test",
+      "First an eyesight check and a 'tell me' question while you're parked, then spoken directions all the way. " +
+      "Put the phone in a holder first, and keep this page open.");
+  }
+  const step = (count, title, ...body) => el("article", { className: "sign step" },
+    el("p", { className: "step-count" }, count), el("h3", { className: "step-title" }, title), ...body);
+  const answer = (key, value) => {
+    b[key] = value;
+    b.step = key === "eyesight" ? "tellme" : "ready";
+    renderTest();
+    scrollTo("start-test");
+    say(b.step === "tellme" ? b.tellMe.q : BRIEFING, "info");
+  };
+  const buttons = (yes, no, key) => el("div", { className: "actions" },
+    el("button", { className: "btn btn-go", type: "button", onclick: () => answer(key, true) }, yes),
+    el("button", { className: "btn", type: "button", onclick: () => answer(key, false) }, no));
+  if (b.step === "eyesight") {
+    return step("Before you drive: 1 of 2", "Eyesight check",
+      el("p", {}, EYESIGHT),
+      buttons("I read it", "I couldn't read it", "eyesight"));
+  }
+  if (b.step === "tellme") {
+    return step("Before you drive: 2 of 2", "'Tell me' question",
+      el("p", { className: "question" }, b.tellMe.q),
+      el("div", { className: "answer" },
+        el("p", { className: "answer-label" }, "For the supervisor, a good answer:"),
+        el("p", {}, b.tellMe.a)),
+      buttons("Right", "Wrong", "tellMeRight"));
+  }
+  return step("Ready", "The drive",
+    b.eyesight === false ? el("p", { className: "warn" }, "On the real test, not reading the number plate is a fail, " +
+                                                        "and the test ends there. You can still carry on practising.") : null,
+    el("p", {}, BRIEFING),
+    startButton(() => driveTest(r), "Start driving",
+                "Spoken directions all the way. Your supervisor marks the drive once you've parked at the end."));
+}
+
+function beginTest(r) {
+  r.before = { step: "eyesight", eyesight: null, tellMeRight: null, tellMe: pickOne(TELL_ME), showMe: pickOne(SHOW_ME) };
+  r.marking = null;
+  r.driven = false;
+  renderTest();
+  scrollTo("start-test");
+  say(EYESIGHT, "info");  // straight from the tap: iPhones only speak after one
 }
 
 function setUpTestOptions() {
@@ -1374,6 +1488,28 @@ function setUpTestOptions() {
   $("emergency").addEventListener("change", e => { state.test.emergency = e.target.value; });
   $("hill").addEventListener("change", e => { state.test.hill = e.target.checked; });
   $("roundabouts").addEventListener("change", e => { state.test.roundabouts = e.target.checked; });
+  // Like the real test, and whether to see the route first: kept on the phone
+  const real = $("real-test"), show = $("show-route");
+  real.checked = settings.realTest;
+  show.checked = settings.showRoute;
+  $("show-route-tick").hidden = !real.checked;
+  real.addEventListener("change", () => {
+    settings.realTest = real.checked;
+    saveSettings();
+    $("show-route-tick").hidden = !real.checked;
+    if (state.result && state.mode === "test" && !drive) {
+      state.result.real = real.checked;
+      renderTest();
+    }
+  });
+  show.addEventListener("change", () => {
+    settings.showRoute = show.checked;
+    saveSettings();
+    if (state.result && state.mode === "test" && !drive && show.checked && !state.result.revealed) {
+      state.result.revealed = true;
+      renderTest();
+    }
+  });
   form.addEventListener("submit", buildTest);
 }
 
@@ -1673,6 +1809,320 @@ function setUpTripOptions() {
   $("trip-options").addEventListener("submit", buildTrip);
 }
 
+// ---------- Like the real test ----------
+// Wording adapted from DVSA's guidance for examiners and its 'show me, tell me' questions (GOV.UK, Open
+// Government Licence). The app never calls the emergency stop: only the supervisor can see what's behind.
+const REAL = {
+  normalStops: 2,      // pull up on the left: one behind a parked car (an angle start), one anywhere safe
+  stopMinutes: 1,      // each, in the test's length
+  clearAhead: [350, 250, 150],  // metres with no turn after asking to pull up, the most that fits
+  awayFromStops: 300,  // metres from a practice stop
+  stopCue: 200,        // ask to pull up for a practice stop this far before it, once past the last turn
+  stillFor: 1,         // seconds standing still, after about 3 without moving, that count as pulled up
+  pastBy: 150,         // metres past a practice stop without stopping: carry on without it
+  mapAhead: 1500,      // metres of the route shown while driving
+};
+const EYESIGHT = "Read the number plate of a parked car about 20 metres away. That's about 5 car lengths.";
+const BRIEFING = "The test will include independent driving, on various roads and in different traffic. Follow the " +
+  "directions as you would a sat nav. There'll be one manoeuvre, and there may be an emergency stop. Only your " +
+  "supervisor will ever ask you to stop, after looking round to check it's safe.";
+const END_OF_TEST = "That's the end of the test. Park when it's safe and switch off the engine. Then your supervisor " +
+  "can mark the drive.";
+// What an examiner says: "cue" to pull up, "after" once you've stopped; "at" on reaching a car park
+const EXAMINER = {
+  normal: { cue: "Pull up on the left at the next safe place, please.", after: "Drive on when you're ready, please." },
+  angle: { cue: "Pull up on the left just before you get to the next parked car, please.",
+           after: "Move off when you're ready, please." },
+  hill_start: { cue: "Pull up on the left along here, please.", after: "Move off when you're ready, please." },
+  emergency_stop: { cue: "Pull up on the left at the next safe place, please.",
+    after: "Shortly, your supervisor will ask you to do an emergency stop. When they say Stop, stop as quickly and " +
+           "safely as you can. They'll look round to check it's safe first. Drive on when you're ready." },
+  parallel_park: { cue: "Pull up on the left at the next safe place, well before the next parked car, please.",
+    after: "This is the parallel parking exercise. Drive forward and stop alongside the car ahead, then reverse in " +
+           "behind it, finishing reasonably close to the kerb and within about two car lengths. Drive on when " +
+           "you've finished." },
+  pull_up_right: { cue: "Pull up on the right when it's safe to do so, please.",
+    after: "Now reverse for about two car lengths, keeping reasonably close to the kerb. Then drive on when " +
+           "you're ready, and rejoin the traffic on the left." },
+  bay_reverse: { at: "I'd like you to reverse park in this car park. Drive in, then reverse into any free bay, " +
+                     "finishing within the lines." },
+  bay_forward: { at: "I'd like you to drive forward into any free bay in this car park, finishing within the lines. " +
+                     "Then reverse out, either to the left or the right." },
+};
+const TELL_ME = [
+  { q: "Tell me how you'd check that the brakes are working before starting a journey.",
+    a: "The brakes shouldn't feel spongy or slack. Test them as you set off. The car shouldn't pull to one side." },
+  { q: "Tell me where you'd find the recommended tyre pressures for this car, and how tyre pressures should be checked.",
+    a: "In the manufacturer's guide. Use a reliable pressure gauge, check and adjust the pressures when the tyres are " +
+       "cold, don't forget the spare, and put the valve caps back on." },
+  { q: "Tell me how you make sure your head restraint is correctly adjusted, so it gives the best protection in a crash.",
+    a: "The firm part of the head restraint should be at least as high as the eyes or the top of the ears, and as " +
+       "close to the back of the head as is comfortable. Some can't be adjusted." },
+  { q: "Tell me how you'd check the tyres have enough tread, and that their general condition is safe for the road.",
+    a: "No cuts or bulges, and at least 1.6 millimetres of tread across the central three quarters of the tyre, all " +
+       "the way round." },
+  { q: "Tell me how you'd check that the headlights and tail lights are working. You don't need to get out of the car.",
+    a: "Switch them on, turning on the ignition if needed, then walk round the car to check." },
+  { q: "Tell me how you'd know if there was a problem with your anti-lock braking system.",
+    a: "A warning light comes on if there's a fault with it." },
+  { q: "Tell me how you'd check the direction indicators are working. You don't need to get out of the car.",
+    a: "Switch on the hazard warning lights, turning on the ignition if needed, then walk round the car to check." },
+  { q: "Tell me how you'd check the brake lights are working on this car.",
+    a: "Press the brake pedal and look for the reflection in windows or garage doors, or ask someone to help." },
+  { q: "Tell me how you'd check the power-assisted steering is working before starting a journey.",
+    a: "If the steering feels heavy, there may be a fault. Gently hold the wheel while starting the engine and feel " +
+       "it move slightly, or turn the wheel just after moving off and feel it help." },
+  { q: "Tell me how you'd switch on the rear fog lights, and when you'd use them. You don't need to get out of the car.",
+    a: "Switch on the dipped headlights (and the ignition if needed), then the fog lights, and check the warning " +
+       "light. Use them when you can't see far, generally less than 100 metres." },
+  { q: "Tell me how you switch your headlights from dipped to main beam, and how you'd know main beam is on.",
+    a: "Use the headlight switch or stalk. A blue warning light on the dashboard shows main beam is on." },
+  { q: "Open the bonnet and tell me how you'd check that the engine has enough oil.",
+    a: "Find the dipstick or oil level indicator, and check the level is between the minimum and maximum marks." },
+  { q: "Open the bonnet and tell me how you'd check that the engine has enough coolant.",
+    a: "Find the high and low marks on the header tank or radiator filler cap, and top up to the right level if needed." },
+  { q: "Open the bonnet and tell me how you'd check that you have a safe level of hydraulic brake fluid.",
+    a: "Find the brake fluid reservoir and check the level against its high and low marks." },
+];
+const SHOW_ME = [
+  { q: "When it's safe to do so, can you show me how you'd wash and clean the rear windscreen?", task: "Wash and clean the rear windscreen" },
+  { q: "When it's safe to do so, can you show me how you'd wash and clean the front windscreen?", task: "Wash and clean the front windscreen" },
+  { q: "When it's safe to do so, can you show me how you'd switch on your dipped headlights?", task: "Switch on the dipped headlights" },
+  { q: "When it's safe to do so, can you show me how you'd set the rear demister?", task: "Set the rear demister" },
+  { q: "When it's safe to do so, can you show me how you'd operate the horn?", task: "Operate the horn" },
+  { q: "When it's safe to do so, can you show me how you'd demist the front windscreen?", task: "Demist the front windscreen" },
+  { q: "When it's safe to do so, can you show me how you'd open and close the side window?", task: "Open and close a side window" },
+];
+const typeOf = e => e.kind === "pullup" ? e.test.type : e.stop.part ? e.stop.part.type : null;
+const pullsUp = e => !!(drive.test && (e.kind === "pullup" || (e.kind === "stop" && !e.stop.final &&
+                                                               EXAMINER[typeOf(e)] && EXAMINER[typeOf(e)].cue)));
+
+// A 'show me' question and the normal stops, placed on quiet stretches spread along what's left of the
+// route, away from turns and practice stops. Called again with what's still to come after a new route.
+function placeTestEvents() {
+  const t = drive.test, r = drive.route;
+  if (!t || !r) return;
+  r.events = r.events.filter(e => e.kind !== "pullup" && e.kind !== "showme");
+  const todo = t.extras.filter(x => !x.done);
+  if (!todo.length) return;
+  const end = r.path[r.path.length - 1].d, from = drive.d, span = end - from;
+  const turns = r.events.filter(e => e.kind === "turn").map(e => e.d);
+  const stops = r.events.filter(e => e.kind === "stop").map(e => e.d);
+  const taken = [];
+  todo.forEach((x, k) => {
+    const want = from + span * (0.12 + 0.76 * (k + 0.5) / todo.length);
+    let best = null;
+    for (const ahead of x.kind === "pullup" ? REAL.clearAhead : [250, 150]) {
+      for (let d = from + 150; d < end - REAL.awayFromStops; d += 20) {
+        if (turns.some(y => y > d - 100 && y < d + ahead)) continue;
+        if (stops.some(y => Math.abs(y - d) < REAL.awayFromStops)) continue;
+        if (taken.some(y => Math.abs(y - d) < 600)) continue;
+        if (best == null || Math.abs(d - want) < Math.abs(best.d - want)) best = { d, ahead };
+      }
+      if (best) break;
+    }
+    if (!best) return;  // nowhere quiet enough on this route
+    taken.push(best.d);
+    const p = pointAt(r.path, best.d);
+    r.events.push({ d: best.d, lat: p.lat, lon: p.lon, kind: x.kind, test: x, ahead: best.ahead });
+  });
+  r.events.sort(byPlace);
+}
+
+// Asking to pull up: then wait until you've stopped (or gone well past)
+function askToPullUp(e) {
+  const type = typeOf(e);
+  drive.waiting = { e, type, still: 0, limit: e.kind === "pullup" ? e.d + e.ahead : e.d + REAL.pastBy };
+  logPlanner(`asked to pull up (${type})`);
+  say(EXAMINER[type].cue, "now");
+}
+
+function checkWaiting(now, stopped) {
+  const w = drive.waiting;
+  if (!w) return;
+  if (stopped) {
+    w.still = w.still || now;
+    if (now - w.still >= REAL.stillFor * 1000) pulledUp(w);
+    return;
+  }
+  w.still = 0;
+  if (drive.d > w.limit) {  // drove on without stopping
+    logPlanner(`didn't pull up (${w.type})`);
+    drive.waiting = null;
+    finishStop(w.e);
+  }
+}
+
+function pulledUp(w) {
+  drive.waiting = null;
+  const e = w.e;
+  // other practice stops at the same place are done here too
+  const together = [e, ...drive.route.events.filter(x => x !== e && x.kind === "stop" && !x.done && pullsUp(x) &&
+                                                       Math.abs(x.d - e.d) <= DRIVE.arrive)];
+  logPlanner(`pulled up (${together.map(typeOf).join(", ")})`);
+  for (const x of together) finishStop(x);
+  say(together.map(x => EXAMINER[typeOf(x)].after).join(" "), "stop");
+  if (together.some(x => typeOf(x) === "emergency_stop")) {
+    drive.test.emergencyBriefed = true;
+    tempNote("Emergency stop: your supervisor says Stop when it's safe behind. The phone never will.", 120);
+  }
+}
+
+// A stop done (or passed): what's said on the way out of it is no longer needed
+function finishStop(x) {
+  x.done = true;
+  if (x.test) x.test.done = true;
+  if (x.kind !== "stop") return;
+  const next = drive.route.events.find(y => y.kind === "start" && y.leg === x.leg + 1 && !y.done);
+  if (next) next.done = true;
+}
+
+function askShowMe() {
+  const q = drive.test.showMe;
+  drive.test.showMeAsked = true;
+  logPlanner(`show me: ${q.task}`);
+  say(q.q, "info");
+  tempNote(`Show me: ${q.task}`, 45);
+}
+
+function tempNote(text, seconds) {
+  drive.temp = { text, until: Date.now() + seconds * 1000 };
+  showDrive();
+}
+
+// ---------- Like the real test: the marking sheet ----------
+// The supervisor marks the drive once parked (supervisors can't use a phone while you drive), as an
+// examiner does: driving faults, serious faults and dangerous faults, with the real test's rules for a pass.
+const MARKS = [
+  ["Precautions"],
+  ["Control", "accelerator", "clutch", "gears", "footbrake", "parking brake", "steering"],
+  ["Move off", "safety", "control"],
+  ["Use of mirrors", "signalling", "change direction", "change speed"],
+  ["Signals", "necessary", "correctly", "timed"],
+  ["Clearance to obstructions"],
+  ["Response to signs and signals", "traffic signs", "road markings", "traffic lights", "traffic controllers", "other road users"],
+  ["Use of speed"],
+  ["Following distance"],
+  ["Progress", "appropriate speed", "undue hesitation"],
+  ["Junctions", "approach speed", "observation", "turning right", "turning left", "cutting corners"],
+  ["Judgement", "overtaking", "meeting", "crossing"],
+  ["Positioning", "normal driving", "lane discipline"],
+  ["Pedestrian crossings"],
+  ["Position and normal stops"],
+  ["Awareness and planning"],
+  ["Ancillary controls"],
+];
+const MANOEUVRE_MARKS = {
+  parallel_park: ["Reverse park (parallel park)", "control", "observation"],
+  bay_reverse: ["Reverse park (car park)", "control", "observation"],
+  bay_forward: ["Forward park", "control", "observation"],
+  pull_up_right: ["Reverse / right (pull up on the right)", "control", "observation"],
+};
+
+function newMarking(test, r) {
+  const types = r.pick.order.filter(p => !p.via).map(p => p.type);
+  const b = r.before || {};
+  return {
+    eyesight: b.eyesight === false,             // couldn't read the number plate
+    vehicle: b.tellMeRight === false,           // a 'tell me' or 'show me' question gone wrong
+    showMe: test.showMeAsked ? test.showMe.task : null, tellMe: b.tellMe ? b.tellMe.q : null,
+    sections: [...(types.includes("emergency_stop") ? [["Controlled stop (emergency stop)", "promptness", "control"]] : []),
+               ...types.filter(t => MANOEUVRE_MARKS[t]).map(t => MANOEUVRE_MARKS[t]), ...MARKS],
+    marks: {},  // "section|item": { n: driving faults, s: serious, d: dangerous }
+  };
+}
+
+function verdict(m) {
+  let driving = m.vehicle ? 1 : 0;  // one driving fault for one or both questions
+  const serious = [], dangerous = [];
+  for (const [key, x] of Object.entries(m.marks)) {
+    const name = key.replace("|", ", ").toLowerCase();
+    driving += x.n;
+    if (x.s) serious.push(name);
+    if (x.d) dangerous.push(name);
+  }
+  const count = (n, what) => `${n} ${what}${n === 1 ? "" : "s"}`;
+  if (m.eyesight) return { pass: false, why: "Couldn't read the number plate. On the real test, that ends the test." };
+  if (dangerous.length) return { pass: false, why: `${count(dangerous.length, "dangerous fault")}: ${dangerous.join("; ")}.` };
+  if (serious.length) return { pass: false, why: `${count(serious.length, "serious fault")}: ${serious.join("; ")}.` };
+  if (driving > 15) return { pass: false, why: `${count(driving, "driving fault")}. 15 is the most you can have and pass.` };
+  return { pass: true, why: driving ? `With ${count(driving, "driving fault")}.` : "With no faults at all." };
+}
+
+function markingSheet(r) {
+  const m = r.marking;
+  const result = el("div", { className: "result", role: "status", "aria-live": "polite" });
+  const update = () => {
+    const v = verdict(m);
+    result.className = `result ${v.pass ? "pass" : "fail"}`;
+    result.replaceChildren(el("p", { className: "result-title" }, v.pass ? "Pass" : "Fail"),
+                           el("p", { className: "result-why" }, v.why));
+  };
+  const toggle = (label, pressed, onChange, className = "mark-btn") => {
+    const b = el("button", { className, type: "button", "aria-pressed": String(pressed) }, label);
+    b.addEventListener("click", () => {
+      const on = b.getAttribute("aria-pressed") !== "true";
+      b.setAttribute("aria-pressed", String(on));
+      onChange(on);
+      update();
+    });
+    return b;
+  };
+  // One thing to mark: driving faults counted, and serious or dangerous
+  const row = (section, item, tally) => {
+    const key = `${section}|${item || ""}`.replace(/\|$/, "");
+    const x = m.marks[key] || (m.marks[key] = { n: 0, s: false, d: false });
+    const label = item ? `${section}, ${item}` : section;
+    const count = el("span", { className: "count", "aria-live": "polite" }, String(x.n));
+    const change = by => {
+      x.n = Math.max(0, x.n + by);
+      count.textContent = String(x.n);
+      tally();
+      update();
+    };
+    return el("div", { className: "mark-row" },
+      el("p", { className: "mark-name" }, item ? sentence(item) : section),
+      el("div", { className: "mark-controls" },
+        el("button", { className: "mark-btn", type: "button", "aria-label": `One fewer driving fault: ${label}`,
+                       onclick: () => change(-1) }, "\u2212"),
+        count,
+        el("button", { className: "mark-btn", type: "button", "aria-label": `Add a driving fault: ${label}`,
+                       onclick: () => change(1) }, "+"),
+        toggle("Serious", x.s, on => { x.s = on; tally(); }, "mark-btn sign-s"),
+        toggle("Dangerous", x.d, on => { x.d = on; tally(); }, "mark-btn sign-d")));
+  };
+  const section = ([name, ...items]) => {
+    const badge = el("span", { className: "tally" });
+    const tally = () => {
+      const marks = (items.length ? items : [""]).map(i => m.marks[`${name}|${i}`.replace(/\|$/, "")]).filter(Boolean);
+      const d = marks.some(x => x.d), s = marks.some(x => x.s), n = marks.reduce((sum, x) => sum + x.n, 0);
+      badge.className = `tally${d ? " dangerous" : s ? " serious" : ""}`;
+      badge.textContent = d ? "Dangerous" : s ? "Serious" : n ? String(n) : "";
+    };
+    const box = el("details", { className: "mark" }, el("summary", {}, el("span", {}, name), badge),
+                   ...(items.length ? items : [null]).map(i => row(name, i, tally)));
+    tally();
+    return box;
+  };
+  const checks = el("details", { className: "mark" },
+    el("summary", {}, el("span", {}, "Eyesight, and 'show me, tell me'")),
+    el("div", { className: "mark-row" },
+      el("p", { className: "mark-name" }, "Couldn't read the number plate"),
+      el("div", { className: "mark-controls" }, toggle("Yes", m.eyesight, on => { m.eyesight = on; }))),
+    el("div", { className: "mark-row" },
+      el("p", { className: "mark-name" }, m.showMe ? `'Show me' (${lowerFirst(m.showMe)}) or 'tell me' question wrong`
+                                                   : "'Tell me' question wrong"),
+      el("div", { className: "mark-controls" }, toggle("Yes", m.vehicle, on => { m.vehicle = on; }))));
+  checks.open = m.eyesight || m.vehicle;
+  update();
+  return el("section", { className: "group", id: "marking" },
+    el("h2", { className: "group-title" }, "Mark the drive"),
+    el("p", { className: "lede" }, "For the supervisor, now you've parked: open each area where something went wrong. " +
+      "Use + for a driving fault, and Serious or Dangerous for something that was. As on the real test, 15 driving " +
+      "faults or fewer and nothing serious or dangerous is a pass."),
+    result, checks, ...m.sections.map(section));
+}
+
 // ---------- Driving: spoken directions along the route ----------
 // The page follows your location along the route, says each direction before you reach it, the way an
 // examiner would, and says what to do at each stop. A web page only runs while it's on screen, so it
@@ -1799,10 +2249,11 @@ async function keepScreenOn() {
   try { drive.wake = await navigator.wakeLock.request("screen"); } catch (err) { drive.wake = null; }
 }
 
-function startButton(onclick) {
+function startButton(onclick, label = "Start driving",
+                     note = "Spoken directions all the way. Put the phone in a holder first, and keep this page open.") {
   return el("div", {},
-    el("button", { className: "btn btn-go start", type: "button", onclick }, "Start driving"),
-    el("p", { className: "start-note" }, "Spoken directions all the way. Put the phone in a holder first, and keep this page open."));
+    el("button", { className: "btn btn-go start", type: "button", onclick }, label),
+    el("p", { className: "start-note" }, note));
 }
 
 // One stop, as the directions need it: what to say on the way and on arriving, and where it is.
@@ -1828,7 +2279,11 @@ function driveTest(r, from = null) {
   }
   stops.push({ final: true, home: true, show: "Back to the start", ahead: "you'll be back at the start", eta: "back at",
                arrived: "You're back at the start. That's the end of your mock test.", at: { lat: o.lat, lon: o.lon } });
-  startDriving({ legs: r.legs, stops, vias }, from);
+  // like the real test, from the start only (a stop's Drive there is practice)
+  const test = r.real && from == null && r.before ? {
+    showMe: r.before.showMe, extras: [{ kind: "showme" }, { kind: "pullup", type: "angle" }, { kind: "pullup", type: "normal" }],
+  } : null;
+  startDriving({ legs: r.legs, stops, vias, test }, from);
 }
 
 function driveTrip(option, from = null) {
@@ -1864,10 +2319,12 @@ function navRoute(legs, stops) {
     const end = path[at[at.length - 1]];
     events.push({ d: end.d, lat: end.lat, lon: end.lon, leg: i, kind: "stop", stop: stops[i] });
   });
-  const rank = { stop: 0, start: 1, turn: 2 };
-  events.sort((a, b) => a.d - b.d || rank[a.kind] - rank[b.kind]);
+  events.sort(byPlace);
   return { path, events, spans };
 }
+
+const RANK = { stop: 0, start: 1, pullup: 2, showme: 3, turn: 4 };
+const byPlace = (a, b) => a.d - b.d || RANK[a.kind] - RANK[b.kind];
 
 // The point of the route at distance d along it, and which way the road goes there
 function pointAt(path, d) {
@@ -1896,12 +2353,14 @@ function startDriving(trip, from = null) {
     }
     if (!stops[0].final) stops[0] = { ...stops[0], pinned: true };
   }
-  drive = { legs, stops, vias, repick: !!trip.repick, d: 0, i: 1, off: 0, offSince: 0, speed: null, bearing: 0,
+  drive = { legs, stops, vias, repick: !!trip.repick, test: trip.test || null, waiting: null, temp: null,
+            d: 0, i: 1, off: 0, offSince: 0, speed: null, bearing: 0,
             lastFix: null, started: false, joined: false, watch: null, wake: null, me: null, ahead: null, aheadCase: null,
             arrows: null, turnMark: null, arrowsAt: -Infinity, rerouting: false, lastReroute: 0, lastTry: 0, finished: false,
             note: "" };
   drive.route = legs ? navRoute(legs, stops) : null;
   if (drive.route) drive.bearing = pointAt(drive.route.path, 15).bearing;  // until you're moving
+  placeTestEvents();
   document.body.classList.add("driving");
   $("drive").hidden = $("drive-bar").hidden = false;
   pickVoice();
@@ -1909,7 +2368,7 @@ function startDriving(trip, from = null) {
   // the first words come straight from the tap: iPhones only speak after one
   const first = drive.route && drive.route.events.find(e => e.kind === "start");
   if (first) first.done = true;
-  say(`Starting. ${first ? first.words.now : ""}`.trim(), "now");
+  say(`${drive.test ? "Drive on when you're ready." : "Starting."} ${first ? first.words.now : ""}`.trim(), "now");
   drive.note = drive.route ? "Keep this page open with the screen on." : "Finding your route...";
   drawDrive();
   showDrive();
@@ -1918,6 +2377,21 @@ function startDriving(trip, from = null) {
              (drive.repick ? `; off the route, ${settings.repick ? "new spots" : "the same spots"}` : ""));
   drive.watch = navigator.geolocation.watchPosition(onFix, onFixError,
                                                     { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
+  drive.timer = setInterval(tick, 1000);
+}
+
+// Once a second: some phones send no new position while you're standing still, so after asking you to
+// pull up, five seconds with none counts as stopped. And notes on screen that have had their time go.
+function tick() {
+  if (!drive || drive.finished) return;
+  if (drive.waiting && drive.lastFixAt && Date.now() - drive.lastFixAt >= 5000) {
+    logPlanner("no new position for 5 s, so taken as pulled up");
+    pulledUp(drive.waiting);
+  }
+  if (drive.temp && Date.now() > drive.temp.until) {
+    drive.temp = null;
+    showDrive();
+  }
 }
 
 function onFixError(err) {
@@ -1941,9 +2415,13 @@ function onFix(pos) {
   const told = Number.isFinite(speed) && speed > 0 ? speed : null;
   const v = told == null && came == null ? null : Math.max(told || 0, came || 0);
   if (v != null) drive.speed = drive.speed == null ? v : 0.4 * drive.speed + 0.6 * v;  // steadier than one fix
+  // Standing still: hardly moved for the last few seconds (and the phone doesn't say otherwise)
+  const recent = drive.fixes.filter(f => f.t >= now - 4000);
+  const stopped = !(told > 0.8) && recent.length > 0 && now - recent[0].t >= 2500 && metresBetween(recent[0], here) < 3;
   drive.fixes.push({ ...here, t: now });
   drive.lastFix = { ...here, t: now };
   drive.fixCount = (drive.fixCount || 0) + 1;
+  drive.lastFixAt = Date.now();
   const moving = Number.isFinite(heading) && drive.speed > 1 ? heading
                : last && moved > 5 ? bearingBetween(last, here) : drive.bearing;
   if (!drive.route) {  // waiting for the first route
@@ -1974,6 +2452,7 @@ function onFix(pos) {
   // Off the route, once you've been on it or have left its start behind (until then you're on your way
   // to it, from a drive or a car park, say)
   const off = spot.off > DRIVE.offRoute && (drive.joined || fromStart > DRIVE.nearStart);
+  checkWaiting(now, stopped);
   if (off) {
     if (!drive.off) logPlanner(`off the route by ${Math.round(spot.off)} m, at ${drive.speed == null ? "?" : drive.speed.toFixed(1)} m/s`);
     drive.off += 1;
@@ -2026,9 +2505,20 @@ function speakAhead() {
   for (const e of drive.route.events) {
     if (e.done) continue;
     const gap = e.d - drive.d;
+    if (e.kind === "showme") {  // asked on a quiet stretch; it doesn't hold anything up
+      if (gap <= 0) { e.done = e.test.done = true; askShowMe(); }
+      continue;
+    }
+    if (pullsUp(e)) {  // like the real test: asked to pull up, with no notice of where or why
+      if (!drive.waiting && gap <= (e.kind === "pullup" ? 0 : REAL.stopCue)) askToPullUp(e);
+      return;
+    }
     if (e.kind === "stop") {
       if (gap <= DRIVE.arrive) { arriveAt(e); if (drive.finished) return; continue; }
-      if (!e.alerted && gap <= alertAt) { e.alerted = true; say(`In ${spokenDistance(gap)}, ${e.stop.ahead}.`, "alert"); }
+      if (!drive.test && !e.alerted && gap <= alertAt) {
+        e.alerted = true;
+        say(`In ${spokenDistance(gap)}, ${e.stop.ahead}.`, "alert");
+      }
       return;
     }
     if (gap < -20) { e.done = true; continue; }  // already past it
@@ -2053,9 +2543,10 @@ function arriveAt(e) {
     if (together.includes(x) || (x.leg > e.leg && x.leg <= last.leg)) x.done = true;
   }
   logPlanner(`arrived at ${together.map(x => x.stop.show).join(", ")}`);
-  const tasks = together.filter(x => !x.stop.final).map((x, k) => (k ? `Then, ${lowerFirst(x.stop.task)}` : x.stop.task));
+  const words = x => (drive.test && EXAMINER[typeOf(x)] && EXAMINER[typeOf(x)].at) || x.stop.task;
+  const tasks = together.filter(x => !x.stop.final).map((x, k) => (k ? `Then, ${lowerFirst(words(x))}` : words(x)));
   if (last.stop.final) {
-    say([...tasks, last.stop.arrived].join(" "), "stop");
+    say([...tasks, drive.test ? END_OF_TEST : last.stop.arrived].join(" "), "stop");
     finishDriving();
     return;
   }
@@ -2158,8 +2649,9 @@ async function replan(here, heading, again) {
     }
     const legs = legsFrom(data, stops.length);
     Object.assign(trip, { legs, stops, vias: stops.map(() => []), d: 0, i: 1, off: 0, offSince: 0, started: true,
-                          joined: false, note: "", arrowsAt: -Infinity });
+                          joined: false, note: "", arrowsAt: -Infinity, waiting: null });
     trip.route = navRoute(legs, stops);
+    placeTestEvents();
     trip.bearing = pointAt(trip.route.path, 15).bearing;
     const first = trip.route.events.find(e => e.kind === "start");
     if (first) first.done = true;
@@ -2187,7 +2679,8 @@ function timeLeft() {
     seconds += s.to > s.from ? s.seconds * Math.min(1, (s.to - Math.max(s.from, drive.d)) / (s.to - s.from)) : 0;
   }
   const practice = r.events.filter(e => e.kind === "stop" && !e.done && !e.stop.final)
-    .reduce((sum, e) => sum + (e.stop.minutes || 0) * 60, 0);
+    .reduce((sum, e) => sum + (e.stop.minutes || 0) * 60, 0) +
+    r.events.filter(e => e.kind === "pullup" && !e.done).length * REAL.stopMinutes * 60;
   return seconds * TEST.slowdown + practice;
 }
 
@@ -2206,12 +2699,24 @@ function layoutDrive() {
 function showDrive() {
   if (!drive) return;
   const r = drive.route, icon = $("drive-icon");
-  const ahead = r && r.events.find(e => !e.done && e.kind !== "start");
+  // in a test, the next direction or the end, never a practice stop before you're asked to pull up
+  const ahead = r && r.events.find(e => !e.done && (e.kind === "turn" ||
+                                                    (e.kind === "stop" && (!drive.test || e.stop.final || !pullsUp(e)))));
+  if (drive.waiting && !drive.finished) {
+    const right = drive.waiting.type === "pull_up_right";
+    $("drive-dist").textContent = "";
+    $("drive-text").textContent = EXAMINER[drive.waiting.type].cue.replace(/, please\.$/, "");
+    icon.innerHTML = arrowSvg(right ? "slightRight" : "slightLeft");
+    $("drive-next").textContent = (drive.temp && drive.temp.text) || "";
+    layoutDrive();
+    return;
+  }
   if (drive.finished || !ahead) {
     const end = drive.stops[drive.stops.length - 1];
     $("drive-dist").textContent = "";
-    $("drive-text").textContent = drive.finished ? end.arrived : drive.note;
-    $("drive-next").textContent = drive.finished ? "Tap End to see the route again." : "";
+    $("drive-text").textContent = drive.finished ? (drive.test ? "That's the end of the test." : end.arrived) : drive.note;
+    $("drive-next").textContent = drive.finished
+      ? (drive.test ? "Once you've parked, tap Mark the drive." : "Tap End to see the route again.") : "";
     icon.innerHTML = drive.finished ? (end.home ? '<span class="finish"></span>' : '<span class="end">B</span>') : "";
     $("drive-eta").textContent = "";
     layoutDrive();
@@ -2223,9 +2728,10 @@ function showDrive() {
     : ahead.stop.final ? (ahead.stop.home ? '<span class="finish"></span>' : '<span class="end">B</span>')
     : `<span class="num">${ahead.stop.number}</span>`;
   const stop = r.events.find(e => e.kind === "stop" && !e.done);
-  const later = !stop || stop === ahead ? "" : stop.stop.final ? `${stop.stop.show} in ${shownDistance(stop.d - drive.d)}`
+  const later = drive.test || !stop || stop === ahead ? ""
+    : stop.stop.final ? `${stop.stop.show} in ${shownDistance(stop.d - drive.d)}`
     : `Stop ${stop.stop.number} in ${shownDistance(stop.d - drive.d)}: ${lowerFirst(stop.stop.name)} on ${stop.stop.street}`;
-  $("drive-next").textContent = drive.note || later;
+  $("drive-next").textContent = (drive.temp && drive.temp.text) || drive.note || later;
   const left = timeLeft(), miles = (r.path[r.path.length - 1].d - drive.d) / 1609.34;
   $("drive-eta").replaceChildren(el("b", {}, shortDuration(left / 60)),
     ` ${miles.toFixed(1)} mi, ${drive.stops[drive.stops.length - 1].eta} ${clock(Date.now() + left * 1000)}`);
@@ -2244,13 +2750,14 @@ function drawDrive() {
   drive.me = drive.ahead = drive.aheadCase = drive.arrows = drive.turnMark = null;
   if (drive.route) {
     const line = drive.route.path.map(p => [p.lat, p.lon]);
-    L.polyline(line, { color: "#8C949B", weight: 8, opacity: 0.8, interactive: false }).addTo(layer);
+    if (!drive.test) L.polyline(line, { color: "#8C949B", weight: 8, opacity: 0.8, interactive: false }).addTo(layer);
     drive.aheadCase = L.polyline(line, { color: "#FFFFFF", weight: 15, interactive: false }).addTo(layer);
     drive.ahead = L.polyline(line, { color: "#0B57A4", weight: 10, interactive: false }).addTo(layer);
     drive.arrows = L.layerGroup().addTo(layer);
     drive.turnMark = L.marker(line[0], { icon: L.divIcon({ className: "", html: '<span class="turn-dot"></span>', iconSize: [18, 18] }),
                                          interactive: false, keyboard: false, opacity: 0 }).addTo(layer);
     drive.stops.forEach(stop => {
+      if (drive.test && !stop.final) return;  // like the real test: no notice of the stops
       const html = !stop.final ? `<span class="num">${stop.number}</span>`
                  : stop.home ? '<span class="finish"></span>' : '<span class="end">B</span>';
       L.marker([stop.at.lat, stop.at.lon], { icon: L.divIcon({ className: "", html, iconSize: [30, 30] }),
@@ -2281,7 +2788,8 @@ function pointMe() {
 function showAhead(next) {
   if (!map || !drive.ahead) return;
   const path = drive.route.path, here = pointAt(path, drive.d);
-  const rest = [[here.lat, here.lon], ...path.slice(here.i).map(p => [p.lat, p.lon])];
+  const until = drive.test ? drive.d + REAL.mapAhead : Infinity;  // in a test, just the road ahead, as a sat nav shows
+  const rest = [[here.lat, here.lon], ...path.slice(here.i).filter(p => p.d <= until).map(p => [p.lat, p.lon])];
   drive.ahead.setLatLngs(rest);
   drive.aheadCase.setLatLngs(rest);
   if (next && next.kind === "turn") {
@@ -2303,6 +2811,8 @@ function showAhead(next) {
 
 function finishDriving() {
   drive.finished = true;
+  drive.waiting = null;
+  if (drive.test) $("end").textContent = "Mark the drive";
   if (drive.watch != null) navigator.geolocation.clearWatch(drive.watch);
   drive.watch = null;
   if (drive.wake) drive.wake.release().catch(() => {});
@@ -2314,6 +2824,8 @@ function finishDriving() {
 function stopDriving() {
   if (!drive) return;
   if (drive.watch != null) navigator.geolocation.clearWatch(drive.watch);
+  clearInterval(drive.timer);
+  const test = drive.test, r = state.result;
   if (drive.wake) drive.wake.release().catch(() => {});
   if ("speechSynthesis" in window) speechSynthesis.cancel();
   if (!drive.finished) logPlanner("ended");
@@ -2321,7 +2833,14 @@ function stopDriving() {
   document.body.classList.remove("driving");
   $("drive").hidden = $("drive-bar").hidden = true;
   $("map").style.top = $("map").style.bottom = "";
+  $("end").textContent = "End";
   if (map) map.invalidateSize();
+  if (test && r && state.mode === "test") {  // a test: mark it, with the route shown now
+    Object.assign(r, { driven: true, revealed: true, marking: newMarking(test, r) });
+    render();
+    scrollTo("marking");
+    return;
+  }
   render();
 }
 
