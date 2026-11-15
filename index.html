@@ -35,7 +35,24 @@
 
   /* Top: title, the three modes and the two ways to choose a start point */
   .top { padding: 22px 16px 6px; }
+  .title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
   h1 { margin: 0; font-size: 34px; line-height: 1.05; letter-spacing: -0.01em; }
+  .settings-btn {
+    flex: none; display: grid; place-items: center; width: 48px; height: 48px; margin-top: -6px; padding: 0;
+    color: var(--black); background: var(--white); border: 2px solid var(--black); border-radius: 10px; cursor: pointer;
+  }
+  .settings-btn[aria-expanded="true"] { background: var(--black); color: var(--white); }
+
+  /* Settings: a panel under the title, saved on the phone */
+  .settings { margin: 14px 0 4px; padding: 16px; background: var(--white); border: 3px solid var(--black); border-radius: 12px; }
+  .settings-title { margin: 0 0 8px; font-size: 24px; line-height: 1.15; }
+  .setting { margin: 0 0 16px; padding: 0; border: 0; min-width: 0; }
+  .setting legend { padding: 0; margin: 0 0 2px; font-weight: 700; }
+  .radio, .settings .tick { display: flex; align-items: center; gap: 12px; min-height: 44px; font-weight: 400; }
+  .radio input, .settings .tick input { flex: none; width: 22px; height: 22px; margin: 0; accent-color: var(--black); }
+  .settings .hint { margin: 2px 0 0; font-size: 15px; }
+  .settings-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .settings-foot .hint { margin: 0; }
   .lede { margin: 6px 0 14px; color: var(--kerb); }
   .modes {
     display: grid; grid-template-columns: repeat(3, 1fr); margin: 0 0 14px;
@@ -128,7 +145,8 @@
   .warn { margin: 6px 0 0; font-weight: 700; color: var(--red); }
   .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
   .actions .btn { padding: 0 10px; }
-  .actions .btn-go:nth-last-child(3) { grid-column: 1 / -1; }  /* iPhone: the main button gets its own row */
+  .actions .btn-go { grid-column: 1 / -1; }  /* the main button gets its own row */
+  .actions > :last-child:nth-child(even) { grid-column: 1 / -1; }  /* and so does one left on its own */
   .more {
     margin-top: 12px; padding: 6px 0; min-height: 44px;
     font: inherit; font-weight: 700; color: var(--blue);
@@ -181,15 +199,33 @@
     padding: calc(12px + env(safe-area-inset-top)) 16px 14px;
     background: var(--black); color: var(--white);
   }
+  .drive-main { display: grid; grid-template-columns: 56px 1fr; gap: 14px; align-items: center; }
+  .drive-icon { display: grid; place-items: center; width: 56px; height: 56px; color: var(--white); }
+  .drive-icon .num, .drive-icon .end { width: 44px; height: 44px; font-size: 24px; }
   .drive-dist { margin: 0; font-size: 40px; font-weight: 700; line-height: 1; }
   .drive-text { margin: 6px 0 0; font-size: 24px; font-weight: 700; line-height: 1.2; }
-  .drive-next { margin: 8px 0 0; color: #D5D8DB; }
+  .drive-next { margin: 10px 0 0; color: #D5D8DB; }
+  .drive-next:empty { display: none; }
   .drive-bar {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000;
     display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
-    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
     background: var(--pavement); border-top: 2px solid var(--black);
   }
+  .drive-eta { grid-column: 1 / -1; margin: 0; }
+  .drive-eta b { font-size: 22px; }
+  .drive-eta:empty { display: none; }
+  /* where you are, pointing the way you're going; arrows along the road ahead; the next turn */
+  .heading { display: block; width: 40px; height: 40px; transition: transform 0.4s; }
+  .chevron { display: block; width: 14px; height: 14px; }
+  .turn-dot {
+    display: block; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--yellow); border: 3px solid var(--black);
+  }
+  @media (prefers-reduced-motion: reduce) { .heading { transition: none; } }
+  .hint { margin: 0; color: var(--kerb); }
+  .log-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .log-tools .btn { min-height: 44px; padding: 0 16px; }
   .drive-bar .btn[aria-pressed="true"] { background: var(--black); color: var(--white); }
 
   .foot { padding: 8px 16px 44px; color: var(--kerb); font-size: 15px; }
@@ -227,7 +263,32 @@
 <body>
 <div class="page">
   <header class="top">
-    <h1>Driving practice</h1>
+    <div class="title-row">
+      <h1>Driving practice</h1>
+      <button id="settings-button" class="settings-btn" type="button" aria-expanded="false" aria-controls="settings">
+        <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M9.66 4.35 10.09 1.17 13.91 1.17 14.34 4.35 15.76 4.94 18.31 2.99 21.01 5.69 19.06 8.24 19.65 9.66 22.83 10.09 22.83 13.91 19.65 14.34 19.06 15.76 21.01 18.31 18.31 21.01 15.76 19.06 14.34 19.65 13.91 22.83 10.09 22.83 9.66 19.65 8.24 19.06 5.69 21.01 2.99 18.31 4.94 15.76 4.35 14.34 1.17 13.91 1.17 10.09 4.35 9.66 4.94 8.24 2.99 5.69 5.69 2.99 8.24 4.94ZM15.40 12a3.4 3.4 0 1 0 -6.80 0a3.4 3.4 0 1 0 6.80 0Z"/></svg>
+        <span class="visually-hidden">Settings</span>
+      </button>
+    </div>
+    <section id="settings" class="settings" aria-labelledby="settings-title" hidden>
+      <h2 id="settings-title" class="settings-title" tabindex="-1">Settings</h2>
+      <fieldset class="setting">
+        <legend>Practice spots, if you go off the route</legend>
+        <label class="radio"><input type="radio" name="repick" value="change"> Change them to suit the new route</label>
+        <label class="radio"><input type="radio" name="repick" value="keep"> Keep the same spots</label>
+        <p class="hint">For A to B. A mock test always keeps its stops, as an examiner would bring you back to the route.</p>
+      </fieldset>
+      <fieldset class="setting">
+        <legend>Troubleshooting</legend>
+        <label class="tick"><input id="keep-log" type="checkbox"> Keep a log</label>
+        <p id="log-hint" class="hint">Route requests and everything said while driving, at the bottom of this page, to copy
+           and send if something goes wrong. Turning it off deletes it.</p>
+      </fieldset>
+      <div class="settings-foot">
+        <p class="hint">Saved on this phone.</p>
+        <button id="settings-done" class="btn btn-go" type="button">Done</button>
+      </div>
+    </section>
     <p class="lede">Quiet streets and car parks to practise in, mock tests that start wherever you are, and
        journeys with practice on the way.</p>
     <div class="modes" role="group" aria-label="What to show">
@@ -288,17 +349,24 @@
     <div class="option stack">
       <span class="option-name" id="practise-name">Practise on the way</span>
       <div id="activities" class="choice wrap" role="group" aria-labelledby="practise-name"></div>
+      <p class="hint">Leave them all off for the quickest way there, with no stops.</p>
     </div>
     <button id="plan" class="btn btn-go" type="submit">Plan my route</button>
   </form>
 </div>
 <div id="map" class="map" role="region" aria-label="Map"></div>
 <section id="drive" class="drive" aria-label="Directions" hidden>
-  <p id="drive-dist" class="drive-dist"></p>
-  <p id="drive-text" class="drive-text" aria-live="polite"></p>
+  <div class="drive-main">
+    <div id="drive-icon" class="drive-icon" aria-hidden="true"></div>
+    <div>
+      <p id="drive-dist" class="drive-dist"></p>
+      <p id="drive-text" class="drive-text" aria-live="polite"></p>
+    </div>
+  </div>
   <p id="drive-next" class="drive-next"></p>
 </section>
 <div id="drive-bar" class="drive-bar" hidden>
+  <p id="drive-eta" class="drive-eta"></p>
   <button id="mute" class="btn" type="button" aria-pressed="false">Mute</button>
   <button id="end" class="btn" type="button">End</button>
 </div>
@@ -362,7 +430,18 @@ const TRIP = {
   slack: 480,          // a route to choose can take this many seconds longer than the quickest, or 40% more
 };
 // Add #debug to the end of the web address to see what the route planner was asked and what it said
-const DEBUG = location.hash === "#debug";
+const DEBUG = location.hash === "#debug";  // the log, whatever the settings say
+
+// Settings, kept on this phone
+const SETTINGS_KEY = "driving-practice-settings";
+const settings = { repick: true, log: false, ...loadSettings() };
+function loadSettings() {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"); } catch (err) { return {}; }
+}
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (err) { /* private browsing: this visit only */ }
+}
+const logging = () => DEBUG || settings.log;
 
 // ---------- Types of spot, in the order they're shown ----------
 const KINDS = [
@@ -507,15 +586,47 @@ function setStatus(text, problem = false, detail = "") {
 }
 
 // What the route planner was asked and said, shown at the bottom of the page with #debug
-const plannerLog = [];
+// With #debug it's kept on the phone between visits (the last 800 lines), with buttons to copy or share it.
+const LOG_KEY = "driving-practice-log";
+const plannerLog = logging() ? loadLog() : [];
+function loadLog() {
+  try { return JSON.parse(localStorage.getItem(LOG_KEY) || "[]"); } catch (err) { return []; }
+}
 function logPlanner(line) {
-  plannerLog.push(`${new Date().toLocaleTimeString("en-GB")}  ${line}`);
+  const when = new Date().toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  plannerLog.push(`${when}  ${line}`);
   console.info(`[planner] ${line}`);
-  if (!DEBUG) return;
+  if (!logging()) return;
+  if (plannerLog.length > 800) plannerLog.splice(0, plannerLog.length - 800);
+  try { localStorage.setItem(LOG_KEY, JSON.stringify(plannerLog)); } catch (err) { /* private browsing: kept for this visit only */ }
+  showLog();
+}
+function hideLog() {
+  for (const id of ["planner-log", "log-tools"]) if ($(id)) $(id).remove();
+}
+function showLog() {
   let box = $("planner-log");
   if (!box) {
+    const copy = el("button", { className: "btn", type: "button" }, "Copy log");
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(plannerLog.join("\n"));
+        copy.textContent = "Copied";
+      } catch (err) {  // no clipboard here: select it, to copy by hand
+        getSelection().selectAllChildren($("planner-log"));
+        copy.textContent = "Selected: copy it";
+      }
+      setTimeout(() => { copy.textContent = "Copy log"; }, 3000);
+    });
+    const share = navigator.share ? el("button", { className: "btn", type: "button",
+      onclick: () => navigator.share({ title: "Driving practice log", text: plannerLog.join("\n") }).catch(() => {}) }, "Share log") : null;
+    const clear = el("button", { className: "btn", type: "button", onclick: () => {
+      plannerLog.length = 0;
+      try { localStorage.removeItem(LOG_KEY); } catch (err) { /* nothing kept */ }
+      showLog();
+    } }, "Clear log");
     box = el("pre", { id: "planner-log", className: "log", "aria-label": "Route planner log" });
-    document.querySelector(".foot").append(box);
+    document.querySelector(".foot").append(el("div", { id: "log-tools", className: "log-tools" }, copy, share, clear), box);
   }
   box.textContent = plannerLog.join("\n");
 }
@@ -839,6 +950,7 @@ function refresh(table) {
     const sxy = xs.reduce((sum, x, k) => sum + (x - mx) * (ys[k] - my), 0);
     const pace = sxx > 0 ? Math.min(900, Math.max(120, sxy / sxx)) : TEST.pace;
     table.model = { pace, overhead: Math.min(180, Math.max(0, my - pace * mx)) };
+    lastModel = table.model;  // the latest pace, for picking stops again on the move
   }
   const { overhead, pace } = table.model;
   table.seconds = real.map((row, i) => row.map((t, j) => i === j ? 0 : t ?? overhead + pace * miles[i][j]));
@@ -1175,10 +1287,13 @@ async function buildTest(event) {
   }
 }
 
-function stopCard(number, title, kindLine, text, leg, dest, vias, extra = []) {
+// "Drive there" starts this page's spoken directions from where you are to this stop, then on to the end.
+// Google Maps (and Apple Maps on an iPhone) are there too, for the drive to this stop only.
+function stopCard(number, title, kindLine, text, leg, dest, vias, extra = [], onDrive = null) {
   const actions = el("div", { className: "actions" },
-    el("a", { className: "btn btn-go", href: legLink(dest, vias), target: "_blank", rel: "noopener" }, "Drive there"),
+    el("button", { className: "btn btn-go", type: "button", onclick: onDrive }, "Drive there"),
     dest.street ? el("a", { className: "btn", href: streetViewLink(dest), target: "_blank", rel: "noopener" }, "Street View") : null,
+    el("a", { className: "btn", href: legLink(dest, vias), target: "_blank", rel: "noopener" }, "Google Maps"),
     IS_IOS ? el("a", { className: "btn", href: appleLink(dest), target: "_blank", rel: "noopener" }, "Apple Maps") : null);
   const minutes = Math.max(1, Math.round(leg.seconds * TEST.slowdown / 60));
   const shown = minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
@@ -1235,11 +1350,11 @@ function renderTest() {
     section.append(stopCard(i + 1, s.street, stop.name, stop.text(s), r.legs[i], s, legVias[i], [
       s.note ? el("p", { className: "note" }, s.note) : null,
       s.nearSchool ? el("p", { className: "warn" }, "Near a school: avoid school-run times") : null,
-    ]));
+    ], () => driveTest(r, i)));
   });
   const home = { navLat: o.lat, navLon: o.lon };
   section.append(stopCard(stops.length + 1, "Back to the start", "", "", r.legs[stops.length], home,
-                          legVias[stops.length]));
+                          legVias[stops.length], [], () => driveTest(r, stops.length)));
   section.append(el("div", { className: "rebuild" },
     el("button", { className: "btn", type: "button", onclick: () => buildTest() }, "Build another")));
   list.append(section);
@@ -1416,8 +1531,14 @@ async function buildTrip(event) {
       Object.assign(t, { dest: place, destText, result: null });
       $("dest").blur();
     }
-    if (!t.activities.size) {
-      setStatus("Choose at least one thing to practise on the way.", true);
+    if (!t.activities.size) {  // nothing to practise: the quickest way there
+      setStatus("Working out the quickest route...");
+      const legs = await routeFor({ order: [] }, true, t.dest);
+      const minutes = Math.round(legs[0].seconds * TEST.slowdown / 60);
+      t.result = { plan: { items: [], notes: [] }, quickest: true, chosen: 0, direct: minutes,
+                   options: [{ pick: { order: [] }, legs, minutes, miles: legs[0].miles }] };
+      renderTrip();
+      scrollTo("map");
       return;
     }
     const plan = planTrip();
@@ -1479,27 +1600,32 @@ function renderTrip() {
     return;
   }
   const many = r.options.length > 1;
-  list.append(el("section", { className: "group" },
-    el("article", { className: "sign summary" },
-      el("h2", { className: "summary-title" }, many ? `${r.options.length} routes to ${t.dest.label}` : `Your route to ${t.dest.label}`),
-      r.direct != null ? el("p", { className: "why" }, `Driving straight there takes about ${formatDuration(r.direct)}.`) : null,
-      many ? el("p", { className: "why" }, "Each one stops at different spots. Choose one to see its stops.") : null,
-      ...r.plan.notes.map(n => el("p", { className: "note" }, n))),
-    el("div", { className: "choices", role: "group", "aria-label": "Routes" }, ...r.options.map((option, k) => choiceCard(option, k)))));
+  list.append(el("section", { className: "group" }, r.quickest
+    ? el("article", { className: "sign summary" },
+        el("h2", { className: "summary-title" }, `Your route to ${t.dest.label}`),
+        el("p", { className: "summary-time" }, `About ${formatDuration(r.options[0].minutes)}, ${r.options[0].miles.toFixed(1)} miles`),
+        el("p", { className: "why" }, "The quickest way, with no practice stops."))
+    : el("article", { className: "sign summary" },
+        el("h2", { className: "summary-title" }, many ? `${r.options.length} routes to ${t.dest.label}` : `Your route to ${t.dest.label}`),
+        r.direct != null ? el("p", { className: "why" }, `Driving straight there takes about ${formatDuration(r.direct)}.`) : null,
+        many ? el("p", { className: "why" }, "Each one stops at different spots. Choose one to see its stops.") : null,
+        ...r.plan.notes.map(n => el("p", { className: "note" }, n))),
+    r.quickest ? null : el("div", { className: "choices", role: "group", "aria-label": "Routes" },
+                           ...r.options.map((option, k) => choiceCard(option, k)))));
 
   const chosen = r.options[r.chosen], stops = chosen.pick.order;
   const section = el("section", { className: "group" },
-    el("h2", { className: "group-title" }, many ? `Route ${r.chosen + 1}` : "The stops"),
+    el("h2", { className: "group-title" }, many ? `Route ${r.chosen + 1}` : r.quickest ? "The way there" : "The stops"),
     startButton(() => driveTrip(chosen)));
   stops.forEach((stop, i) => {
     const s = stop.spot;
     section.append(stopCard(i + 1, s.street, stop.name, stop.text(s), chosen.legs[i], s, [], [
       s.note ? el("p", { className: "note" }, s.note) : null,
       s.nearSchool ? el("p", { className: "warn" }, "Near a school: avoid school-run times") : null,
-    ]));
+    ], () => driveTrip(chosen, i)));
   });
   const arrive = stopCard("B", `Arrive at ${t.dest.label}`, "", "", chosen.legs[stops.length],
-                          { navLat: t.dest.lat, navLon: t.dest.lon }, []);
+                          { navLat: t.dest.lat, navLon: t.dest.lon }, [], [], () => driveTrip(chosen, stops.length));
   arrive.querySelector(".badge").classList.add("badge-end");  // like the B on the map
   arrive.querySelector(".stop-name .visually-hidden").textContent = "End: ";
   section.append(arrive);
@@ -1550,10 +1676,15 @@ function setUpTripOptions() {
 // ---------- Driving: spoken directions along the route ----------
 // The page follows your location along the route, says each direction before you reach it, the way an
 // examiner would, and says what to do at each stop. A web page only runs while it's on screen, so it
-// keeps the screen on, and finds a new route if you leave this one.
+// keeps the screen on. Off the route, it finds a new one from where you are, picking the practice stops
+// again to suit where you now are.
 const DRIVE = {
-  offRoute: 45,        // metres from the route, three fixes running, before finding a new route
-  rerouteEvery: 20,    // seconds between new routes, at most
+  offRoute: 45,        // metres from the route, three fixes running, counts as off it
+  rerouteEvery: 15,    // seconds between new routes, at most
+  carSpeed: 3,         // metres a second: faster than this is driving, slower is walking or stopped
+  walkingWait: 30,     // seconds off the route before a new one, when not moving like a car
+  firstFix: 60,        // metres from the route on starting: plan from where you are straight away,
+  nearStart: 150,      // unless this close to its start: the route begins on the nearest road to you
   lookAhead: 600,      // metres ahead of where you were to look for where you are now
   alertSeconds: 15,    // say what's coming about this many seconds before it, at your speed,
   alertMin: 120,       // but no closer than this many metres
@@ -1562,13 +1693,25 @@ const DRIVE = {
   nowMin: 25,
   nowMax: 80,
   arrive: 35,          // metres from a stop to count as there
+  choices: 4,          // spots weighed for each stop when picking again on the move
+  arrows: 1200,        // metres of road ahead with arrows on the map showing the way
 };
 let drive = null;
-const voice = { on: true, chosen: null };
+let lastModel = { overhead: TEST.overhead, pace: TEST.pace };
+const voice = { on: true, chosen: null, current: null, said: null, since: 0 };
 
 const metresBetween = (a, b) => milesBetween(a, b) * 1609.34;
 const lowerFirst = text => text ? text[0].toLowerCase() + text.slice(1) : "";
 const ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth"];
+const clock = when => new Date(when).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+const shortDuration = minutes => {
+  const m = Math.max(1, Math.round(minutes));
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+};
+function bearingBetween(a, b) {  // degrees clockwise from north
+  const k = Math.cos(a.lat * Math.PI / 180);
+  return (Math.atan2((b.lon - a.lon) * k, b.lat - a.lat) * 180 / Math.PI + 360) % 360;
+}
 
 // Distances the way UK satnavs say them, and shorter for the screen
 function spokenDistance(m) {
@@ -1586,16 +1729,45 @@ function shownDistance(m) {
   return yards < 1000 ? `${Math.max(10, Math.round(yards / 10) * 10)} yd` : `${(m / 1609.34).toFixed(1)} mi`;
 }
 
+// Arrows for the panel: which way the next direction goes
+const TURN_ARROWS = {
+  straight: "M32 56V14M19 27l13-13 13 13",
+  right: "M22 56V36q0-12 12-12h16M40 14l10 10-10 10",
+  left: "M42 56V36q0-12-12-12H14M24 14 14 24l10 10",
+  slightRight: "M24 56V38l22-22M32 16h14v14",
+  slightLeft: "M40 56V38L18 16M32 16H18v14",
+  uturnRight: "M22 56V26c0-8 5-13 12-13s12 5 12 13v14M36 30l10 10 10-10",
+  uturnLeft: "M42 56V26c0-8-5-13-12-13s-12 5-12 13v14M8 30l10 10 10-10",
+  roundabout: "M32 56V41M22 31a10 10 0 1 0 20 0a10 10 0 1 0-20 0M39 24l11-11M40 13h10v10",
+};
+function arrowFor(type) {
+  if (type === 26) return "roundabout";
+  if ([9, 18, 20, 23, 37].includes(type)) return "slightRight";
+  if ([16, 19, 21, 24, 38].includes(type)) return "slightLeft";
+  if ([10, 11].includes(type)) return "right";
+  if ([14, 15].includes(type)) return "left";
+  if (type === 12) return "uturnRight";
+  if (type === 13) return "uturnLeft";
+  return "straight";
+}
+const arrowSvg = name => `<svg viewBox="0 0 64 64" width="56" height="56" aria-hidden="true"><path d="${TURN_ARROWS[name]}" ` +
+  'fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const HEADING = '<span class="heading"><svg viewBox="0 0 40 40" width="40" height="40" aria-hidden="true">' +
+  '<path d="M20 3 34 35 20 27 6 35Z" fill="#0B57A4" stroke="#FFFFFF" stroke-width="3" stroke-linejoin="round"/></svg></span>';
+const CHEVRON = deg => `<span class="chevron" style="transform: rotate(${Math.round(deg)}deg)">` +
+  '<svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true"><path d="M2.8 9.6 7 5l4.2 4.6" fill="none" ' +
+  'stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+
 // What to say for one of the planner's directions. Roundabouts as examiners put them; the rest as the
 // planner words them ("Turn left onto Cheam Road.").
 function wordsFor(m) {
   if (m.type === 26) {
     const exit = m.exits ? `${ORDINALS[m.exits - 1] || `${m.exits}th`} exit` : "exit";
     const onto = m.street ? ` onto ${m.street}` : "";
-    return { now: `At the roundabout, take the ${exit}${onto}.`, show: `Roundabout: take the ${exit}${onto}` };
+    return { now: `At the roundabout, take the ${exit}${onto}.`, show: `Roundabout: take the ${exit}${onto}`, arrow: "roundabout" };
   }
   const now = (m.say || m.text || "").trim();
-  return { now, show: now.replace(/\.$/, "") };
+  return { now, show: now.replace(/\.$/, ""), arrow: arrowFor(m.type) };
 }
 
 function pickVoice() {
@@ -1605,20 +1777,20 @@ function pickVoice() {
                  voices.find(v => /^en/i.test(v.lang)) || null;
 }
 
-// "now": more pressing than whatever is being said, so that stops, unless it's what to do at a stop
-// ("keep"), which is never cut short
-function say(text, { now = false, keep = false } = {}) {
+// Say something. Kinds: "alert", a direction coming up, which may be cut short by the next one; "now", a
+// direction to act on; "stop", what to do at a stop; and "info". Only an alert is ever cut short: the
+// rest wait their turn.
+function say(text, kind = "info") {
   if (!text) return;
   logPlanner(`said: ${text}`);
   if (!voice.on || !("speechSynthesis" in window)) return;
-  if (now && !voice.keeping) speechSynthesis.cancel();
+  const saying = voice.current && Date.now() - voice.since < 20000 ? voice.current : null;  // phones can miss an end
+  if (kind === "now" && saying === "alert") speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "en-GB";
   if (voice.chosen) u.voice = voice.chosen;
-  if (keep) {
-    voice.keeping = true;
-    u.onend = u.onerror = () => { voice.keeping = false; };
-  }
+  u.onstart = () => Object.assign(voice, { current: kind, said: u, since: Date.now() });
+  u.onend = u.onerror = () => { if (voice.said === u) Object.assign(voice, { current: null, said: null }); };
   speechSynthesis.speak(u);
 }
 
@@ -1633,39 +1805,44 @@ function startButton(onclick) {
     el("p", { className: "start-note" }, "Spoken directions all the way. Put the phone in a holder first, and keep this page open."));
 }
 
-// One stop, as the directions need it: what to say on the way and on arriving, and where it is
-function driveStop(part) {
+// One stop, as the directions need it: what to say on the way and on arriving, and where it is.
+// "pinned" stops were chosen by tapping Drive there, so they aren't picked again on the move.
+function driveStop(part, number, pinned = false) {
   const s = part.spot;
   return {
-    name: part.name, street: s.street, task: `${part.name}. ${part.text(s)}`, show: `${part.name}: ${s.street}`,
+    part, number, pinned, minutes: part.minutes, name: part.name, street: s.street,
+    task: `${part.name}. ${part.text(s)}`, show: `${part.name}: ${s.street}`,
     ahead: `your next stop is ${s.street}, ${part.why}`,
     at: { lat: s.navLat, lon: s.navLon, heading: part.type === "hill_start" ? s.heading : null },
   };
 }
 
-function driveTest(r) {
+// "from": which stop's Drive there was tapped, if one was. A mock test keeps its stops if you go off the
+// route, as an examiner would; A to B picks them again to suit where you are.
+function driveTest(r, from = null) {
   const o = state.origin, stops = [], vias = [[]];
   for (const part of r.pick.order) {
     if (part.via) { vias[vias.length - 1].push(part.spot); continue; }
-    stops.push(driveStop(part));
+    stops.push(driveStop(part, stops.length + 1));
     vias.push([]);
   }
-  stops.push({ final: true, home: true, show: "Back to the start", ahead: "you'll be back at the start",
+  stops.push({ final: true, home: true, show: "Back to the start", ahead: "you'll be back at the start", eta: "back at",
                arrived: "You're back at the start. That's the end of your mock test.", at: { lat: o.lat, lon: o.lon } });
-  startDriving({ legs: r.legs, stops, vias });
+  startDriving({ legs: r.legs, stops, vias }, from);
 }
 
-function driveTrip(option) {
+function driveTrip(option, from = null) {
   const b = state.trip.dest;
-  const stops = option.pick.order.map(driveStop);
-  stops.push({ final: true, show: `Arrive at ${b.label}`, ahead: `you'll arrive at ${b.label}`,
+  const stops = option.pick.order.map((part, i) => driveStop(part, i + 1));
+  stops.push({ final: true, show: `Arrive at ${b.label}`, ahead: `you'll arrive at ${b.label}`, eta: "arriving",
                arrived: `You've arrived at ${b.label}.`, at: { lat: b.lat, lon: b.lon } });
-  startDriving({ legs: option.legs, stops, vias: stops.map(() => []) });
+  startDriving({ legs: option.legs, stops, vias: stops.map(() => []), repick: true }, from);
 }
 
-// The route as one line, with the distance along it of every point, and what to say where
+// The route as one line, with the distance along it of every point, what to say where, and how long
+// each leg takes
 function navRoute(legs, stops) {
-  const path = [], events = [];
+  const path = [], events = [], spans = [];
   legs.forEach((leg, i) => {
     const at = [];  // where each point of this leg's line is in the path
     leg.line.forEach(([lat, lon], k) => {
@@ -1675,42 +1852,70 @@ function navRoute(legs, stops) {
       at.push(path.length - 1);
     });
     if (!at.length) return;
+    spans.push({ from: path[at[0]].d, to: path[at[at.length - 1]].d, seconds: leg.seconds });
     for (const m of leg.moves || []) {
       if ([4, 5, 6, 7, 8, 27].includes(m.type)) continue;  // arriving, carrying on, leaving a roundabout
       const words = wordsFor(m);
       if (!words.now) continue;
-      events.push({ d: path[at[Math.min(m.begin, at.length - 1)]].d, leg: i, words,
+      const point = path[at[Math.min(m.begin, at.length - 1)]];
+      events.push({ d: point.d, lat: point.lat, lon: point.lon, leg: i, words,
                     kind: [1, 2, 3].includes(m.type) ? "start" : "turn" });
     }
-    events.push({ d: path[at[at.length - 1]].d, leg: i, kind: "stop", stop: stops[i] });
+    const end = path[at[at.length - 1]];
+    events.push({ d: end.d, lat: end.lat, lon: end.lon, leg: i, kind: "stop", stop: stops[i] });
   });
   const rank = { stop: 0, start: 1, turn: 2 };
   events.sort((a, b) => a.d - b.d || rank[a.kind] - rank[b.kind]);
-  return { path, events };
+  return { path, events, spans };
 }
 
-function startDriving(trip) {
+// The point of the route at distance d along it, and which way the road goes there
+function pointAt(path, d) {
+  let lo = 1, hi = path.length - 1;
+  while (lo < hi) {  // the first point at or beyond d
+    const mid = (lo + hi) >> 1;
+    if (path[mid].d < d) lo = mid + 1; else hi = mid;
+  }
+  const a = path[lo - 1] || path[0], b = path[lo] || a;
+  const t = b.d > a.d ? Math.min(1, Math.max(0, (d - a.d) / (b.d - a.d))) : 0;
+  return { lat: a.lat + t * (b.lat - a.lat), lon: a.lon + t * (b.lon - a.lon), bearing: bearingBetween(a, b), i: lo };
+}
+
+function startDriving(trip, from = null) {
   if (!("geolocation" in navigator) || !window.isSecureContext) {
     setStatus("This browser can't share your location here, so spoken directions can't follow you.", true);
     return;
   }
   if (drive) stopDriving();
-  drive = { ...trip, d: 0, off: 0, speed: 13, lastFix: null, watch: null, wake: null, me: null,
-            rerouting: false, lastReroute: 0, finished: false, note: "" };
-  drive.route = navRoute(drive.legs, drive.stops);
+  let { legs, stops, vias } = trip;
+  if (from != null) {  // a stop's Drive there: that stop stays, whatever happens on the way
+    if (from > 0) {  // and the route there starts from where you are
+      stops = stops.slice(from);
+      vias = vias.slice(from);
+      legs = null;
+    }
+    if (!stops[0].final) stops[0] = { ...stops[0], pinned: true };
+  }
+  drive = { legs, stops, vias, repick: !!trip.repick, d: 0, i: 1, off: 0, offSince: 0, speed: null, bearing: 0,
+            lastFix: null, started: false, joined: false, watch: null, wake: null, me: null, ahead: null, aheadCase: null,
+            arrows: null, turnMark: null, arrowsAt: -Infinity, rerouting: false, lastReroute: 0, lastTry: 0, finished: false,
+            note: "" };
+  drive.route = legs ? navRoute(legs, stops) : null;
+  if (drive.route) drive.bearing = pointAt(drive.route.path, 15).bearing;  // until you're moving
   document.body.classList.add("driving");
   $("drive").hidden = $("drive-bar").hidden = false;
-  if (map) map.invalidateSize();  // without the map, the directions still work
-  drawDrive();
   pickVoice();
   if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = pickVoice;
   // the first words come straight from the tap: iPhones only speak after one
-  const first = drive.route.events.find(e => e.kind === "start");
+  const first = drive.route && drive.route.events.find(e => e.kind === "start");
   if (first) first.done = true;
-  say(`Starting. ${first ? first.words.now : ""}`.trim(), { now: true });
-  drive.note = "Keep this page open with the screen on.";
+  say(`Starting. ${first ? first.words.now : ""}`.trim(), "now");
+  drive.note = drive.route ? "Keep this page open with the screen on." : "Finding your route...";
+  drawDrive();
   showDrive();
   keepScreenOn();
+  logPlanner(`started driving${from != null ? ` to stop ${from + 1}` : ""}` +
+             (drive.repick ? `; off the route, ${settings.repick ? "new spots" : "the same spots"}` : ""));
   drive.watch = navigator.geolocation.watchPosition(onFix, onFixError,
                                                     { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
 }
@@ -1726,24 +1931,70 @@ function onFixError(err) {
 function onFix(pos) {
   if (!drive || drive.finished) return;
   const { latitude: lat, longitude: lon, accuracy, speed, heading } = pos.coords;
-  const here = { lat, lon }, now = pos.timestamp || Date.now();
-  if (drive.lastFix) {
-    const seconds = (now - drive.lastFix.t) / 1000;
-    if (speed != null && speed >= 0) drive.speed = speed;
-    else if (seconds >= 0.5) drive.speed = Math.min(40, metresBetween(drive.lastFix, here) / seconds);
-  }
+  const here = { lat, lon }, now = pos.timestamp || Date.now(), last = drive.lastFix;
+  const moved = last ? metresBetween(last, here) : 0;
+  // How fast you're going: the phone's own figure if it has one (some say 0 when they don't), or how far
+  // you've come in the last few seconds, which a wobble in one fix hardly changes
+  drive.fixes = (drive.fixes || []).filter(f => f.t >= now - 10000 && f.t < now);
+  const oldest = drive.fixes[0], seconds = oldest ? (now - oldest.t) / 1000 : 0;
+  const came = seconds >= 0.5 ? Math.min(40, metresBetween(oldest, here) / seconds) : null;
+  const told = Number.isFinite(speed) && speed > 0 ? speed : null;
+  const v = told == null && came == null ? null : Math.max(told || 0, came || 0);
+  if (v != null) drive.speed = drive.speed == null ? v : 0.4 * drive.speed + 0.6 * v;  // steadier than one fix
+  drive.fixes.push({ ...here, t: now });
   drive.lastFix = { ...here, t: now };
-  if (drive.me) drive.me.setLatLng([lat, lon]);
-  if (map) map.panTo([lat, lon], { animate: false });
+  drive.fixCount = (drive.fixCount || 0) + 1;
+  const moving = Number.isFinite(heading) && drive.speed > 1 ? heading
+               : last && moved > 5 ? bearingBetween(last, here) : drive.bearing;
+  if (!drive.route) {  // waiting for the first route
+    drive.bearing = moving;
+    placeMe(here);
+    replan(here, heading, false);
+    showDrive();
+    return;
+  }
   const spot = whereOnRoute(here);
-  if (spot.off > DRIVE.offRoute && (accuracy == null || accuracy <= 50)) {
+  if (spot.off > DRIVE.offRoute && accuracy > 50) {  // too rough to tell where on the road you are
+    drive.bearing = moving;
+    placeMe(here);
+    return;
+  }
+  const fromStart = metresBetween(here, drive.route.path[0]);
+  if (!drive.started) {  // the first fix: well away from the route and its start, plan from here
+    drive.started = true;
+    if (spot.off > DRIVE.firstFix && fromStart > DRIVE.nearStart) {
+      logPlanner(`starting ${Math.round(spot.off)} m from the route`);
+      drive.bearing = moving;
+      placeMe(here);
+      replan(here, heading, false);
+      return;
+    }
+  }
+  if (spot.off <= DRIVE.offRoute) drive.joined = true;
+  // Off the route, once you've been on it or have left its start behind (until then you're on your way
+  // to it, from a drive or a car park, say)
+  const off = spot.off > DRIVE.offRoute && (drive.joined || fromStart > DRIVE.nearStart);
+  if (off) {
+    if (!drive.off) logPlanner(`off the route by ${Math.round(spot.off)} m, at ${drive.speed == null ? "?" : drive.speed.toFixed(1)} m/s`);
     drive.off += 1;
-    if (drive.off >= 3) reroute(here, heading);
+    drive.offSince = drive.offSince || now;
+    // driving: a new route straight away; walking: after a while; standing still: not until you move
+    const driving = drive.speed == null || drive.speed >= DRIVE.carSpeed;
+    const walking = drive.speed >= 0.7 && now - drive.offSince >= DRIVE.walkingWait * 1000;
+    if (drive.off >= 3 && (driving || walking)) replan(here, heading, true);
+    if (!drive.rerouting) drive.note = "Off the route";
+    drive.bearing = moving;
   } else {
     drive.off = 0;
+    drive.offSince = 0;
+    if (drive.note === "Off the route") drive.note = "";
     drive.d = Math.max(drive.d, spot.d);
+    const p = pointAt(drive.route.path, drive.d);
+    drive.i = p.i;
+    drive.bearing = p.bearing;  // along the road
     speakAhead();
   }
+  placeMe(here);
   showDrive();
 }
 
@@ -1769,7 +2020,7 @@ function whereOnRoute(here) {
 
 // Say what's coming next, once ahead of it and again on reaching it. Not past a stop.
 function speakAhead() {
-  const v = Math.max(5, drive.speed || 13);
+  const v = Math.max(5, drive.speed || 13);  // stopped or not known yet: as if at 30 mph
   const alertAt = Math.min(DRIVE.alertMax, Math.max(DRIVE.alertMin, v * DRIVE.alertSeconds));
   const nowAt = Math.min(DRIVE.nowMax, Math.max(DRIVE.nowMin, v * DRIVE.nowSeconds));
   for (const e of drive.route.events) {
@@ -1777,13 +2028,13 @@ function speakAhead() {
     const gap = e.d - drive.d;
     if (e.kind === "stop") {
       if (gap <= DRIVE.arrive) { arriveAt(e); if (drive.finished) return; continue; }
-      if (!e.alerted && gap <= alertAt) { e.alerted = true; say(`In ${spokenDistance(gap)}, ${e.stop.ahead}.`); }
+      if (!e.alerted && gap <= alertAt) { e.alerted = true; say(`In ${spokenDistance(gap)}, ${e.stop.ahead}.`, "alert"); }
       return;
     }
     if (gap < -20) { e.done = true; continue; }  // already past it
     if (gap > alertAt) return;
-    if (gap <= nowAt) { e.done = true; say(e.words.now, { now: true }); continue; }
-    if (!e.alerted && gap > nowAt + 30) { e.alerted = true; say(`In ${spokenDistance(gap)}, ${lowerFirst(e.words.now)}`); }
+    if (gap <= nowAt) { e.done = true; say(e.words.now, "now"); continue; }
+    if (!e.alerted && gap > nowAt + 30) { e.alerted = true; say(`In ${spokenDistance(gap)}, ${lowerFirst(e.words.now)}`, "alert"); }
     return;
   }
 }
@@ -1801,95 +2052,253 @@ function arriveAt(e) {
   for (const x of drive.route.events) {
     if (together.includes(x) || (x.leg > e.leg && x.leg <= last.leg)) x.done = true;
   }
+  logPlanner(`arrived at ${together.map(x => x.stop.show).join(", ")}`);
   const tasks = together.filter(x => !x.stop.final).map((x, k) => (k ? `Then, ${lowerFirst(x.stop.task)}` : x.stop.task));
   if (last.stop.final) {
-    say([...tasks, last.stop.arrived].join(" "), { now: true, keep: true });
+    say([...tasks, last.stop.arrived].join(" "), "stop");
     finishDriving();
     return;
   }
   const next = drive.route.events.find(x => x.kind === "start" && x.leg === last.leg + 1 && !x.done);
   if (next) next.done = true;
-  say(`${tasks.join(" ")}${next ? ` When you've finished, ${lowerFirst(next.words.now)}` : ""}`, { now: true, keep: true });
+  say(`${tasks.join(" ")}${next ? ` When you've finished, ${lowerFirst(next.words.now)}` : ""}`, "stop");
 }
 
-// Off the route: a new one from here to the stops still to come (on this leg, the places to pass
-// through are left out)
-async function reroute(here, heading) {
-  if (drive.rerouting || Date.now() - drive.lastReroute < DRIVE.rerouteEvery * 1000) return;
-  drive.rerouting = true;
-  drive.lastReroute = Date.now();
-  say("Finding a new route.", { now: true });
-  drive.note = "Finding a new route...";
-  showDrive();
-  const trip = drive;
-  const next = trip.route.events.find(e => e.kind === "stop" && !e.done);
-  const from = next ? next.leg : trip.stops.length - 1;
-  const stops = trip.stops.slice(from), vias = trip.vias.slice(from).map((list, k) => (k ? list : []));
-  const locations = [{ lat: coord(here.lat), lon: coord(here.lon), type: "break" }];
-  if (Number.isFinite(heading) && trip.speed > 3) Object.assign(locations[0], { heading: Math.round(heading) % 360, heading_tolerance: 45 });
-  stops.forEach((stop, k) => {
-    for (const v of vias[k]) locations.push({ lat: coord(v.navLat), lon: coord(v.navLon), type: "through" });
-    const loc = { lat: coord(stop.at.lat), lon: coord(stop.at.lon), type: "break" };
-    if (stop.at.heading != null) Object.assign(loc, { heading: Math.round(stop.at.heading) % 360, heading_tolerance: 60 });
-    locations.push(loc);
+// The practice stops still to come, picked again from where you are: for each one not chosen by hand,
+// the spot of its kind near the way from here to the end that makes the drive shortest (often the same
+// one), in the best order. Times are estimates at the planner's pace, so this needs no extra request.
+function pickAgain(here, stops, end, used = []) {
+  const pinned = stops.filter(s => s.pinned), free = stops.filter(s => !s.pinned);
+  if (!free.length) return stops;
+  const seconds = (a, b) => lastModel.overhead + lastModel.pace * milesBetween(a, b);
+  const straight = milesBetween(here, end);
+  const width = Math.min(TRIP.maxMiles, Math.max(TRIP.minMiles, straight * TRIP.corridor));
+  const taken = new Set([...used, ...pinned.map(s => s.part.spot.id)]);  // spots already practised at, or kept
+  const per = free.length > 3 ? 3 : DRIVE.choices;  // fewer to weigh when there are many stops
+  const options = free.map(stop => {
+    const near = state.spots.filter(x => x.kind === stop.part.kind && !taken.has(x.id) && offLine(here, end, x) <= width)
+      .map(x => ({ x, cost: milesBetween(here, x) + milesBetween(x, end) - straight }))
+      .sort((a, b) => a.cost - b.cost).slice(0, per).map(c => c.x);
+    if (!near.some(x => x.id === stop.part.spot.id)) near.push(stop.part.spot);  // the one it had stays a choice
+    return near;
   });
+  const after = pinned.length ? pinned[pinned.length - 1].at : here;  // stops chosen by hand come first
+  const at = x => ({ lat: x.navLat, lon: x.navLon });
+  let best = null;
+  const choose = (k, picked) => {
+    if (k < free.length) {
+      for (const x of options[k]) {
+        if (!picked.some(p => p.id === x.id)) choose(k + 1, [...picked, x]);  // one spot can't be two stops
+      }
+      return;
+    }
+    for (const order of ordersOf(picked.length)) {
+      let total = 0, from = after;
+      for (const j of order) { total += seconds(from, at(picked[j])); from = at(picked[j]); }
+      total += seconds(from, end);
+      if (!best || total < best.total) {
+        best = { total, order: order.map(j => driveStop({ ...free[j].part, spot: picked[j] }, free[j].number)) };
+      }
+    }
+  };
+  choose(0, []);
+  return best ? [...pinned, ...best.order] : stops;
+}
+
+// A new route from here to the stops still to come ("again": pick the practice stops again to suit
+// where you are). Places to pass through are left out. It isn't announced, as that would talk over the
+// directions: the screen says it, and the first direction of the new route is said when it comes.
+async function replan(here, heading, again) {
+  if (drive.rerouting) return;
+  const now = Date.now();
+  if (again ? now - drive.lastReroute < DRIVE.rerouteEvery * 1000 || now - drive.lastTry < 3000
+            : now - drive.lastTry < 8000) return;
+  const trip = drive, fixes = trip.fixCount;
+  trip.rerouting = true;
+  trip.lastTry = now;
+  if (again) trip.lastReroute = now;
+  trip.note = trip.route ? "Finding a new route..." : "Finding your route...";
+  showDrive();
+  const left = trip.route ? trip.route.events.filter(e => e.kind === "stop" && !e.done).map(e => e.stop) : trip.stops;
+  const final = left[left.length - 1], was = left[0];
+  let stops = left.slice(0, -1);
+  if (again && trip.repick && settings.repick) {  // the same numbers as before, in the new order
+    const numbers = stops.map(s => s.number).sort((x, y) => x - y);
+    const used = trip.route.events.filter(e => e.kind === "stop" && e.done && e.stop.part).map(e => e.stop.part.spot.id);
+    stops = pickAgain(here, stops, final.at, used).map((s, k) => ({ ...s, number: numbers[k] }));
+  }
+  stops.push(final);
+  const ask = uphill => {
+    const locations = [{ lat: coord(here.lat), lon: coord(here.lon), type: "break" }];
+    if (Number.isFinite(heading) && trip.speed >= DRIVE.carSpeed) {  // driving: carry on the way you're going
+      Object.assign(locations[0], { heading: Math.round(heading) % 360, heading_tolerance: 45 });
+    }
+    for (const stop of stops) {
+      const loc = { lat: coord(stop.at.lat), lon: coord(stop.at.lon), type: "break" };
+      if (uphill && stop.at.heading != null) {
+        Object.assign(loc, { heading: Math.round(stop.at.heading) % 360, heading_tolerance: 60 });
+      }
+      locations.push(loc);
+    }
+    return askRouter("route", { locations, costing: "auto", units: "miles", language: "en-US" });
+  };
   try {
-    const data = await askRouter("route", { locations, costing: "auto", units: "miles", language: "en-US" });
+    let data;
+    try {
+      data = await ask(true);
+    } catch (err) {  // perhaps it can't arrive uphill from here: try without
+      if (err.offline || !stops.some(stop => stop.at.heading != null) || drive !== trip) throw err;
+      data = await ask(false);
+    }
     if (drive !== trip) return;  // ended meanwhile
+    if (trip.route && trip.fixCount > fixes && trip.off === 0) {  // back on the route meanwhile: keep it
+      logPlanner("back on the route, so the new one isn't needed");
+      trip.note = "";
+      return;
+    }
     const legs = legsFrom(data, stops.length);
-    Object.assign(trip, { legs, stops, vias, d: 0, off: 0, note: "" });
+    Object.assign(trip, { legs, stops, vias: stops.map(() => []), d: 0, i: 1, off: 0, offSince: 0, started: true,
+                          joined: false, note: "", arrowsAt: -Infinity });
     trip.route = navRoute(legs, stops);
+    trip.bearing = pointAt(trip.route.path, 15).bearing;
     const first = trip.route.events.find(e => e.kind === "start");
-    if (first) { first.done = true; say(first.words.now); }
+    if (first) first.done = true;
+    const moved = was && !was.final && stops[0].street !== was.street;
+    logPlanner(`new route: ${stops.map(s => s.show).join(", ")}`);
+    say([moved ? `Your next stop is now ${stops[0].street}, ${stops[0].part.why}.` : "",
+         first ? first.words.now : ""].join(" ").trim(), "info");
     drawDrive();
   } catch (err) {
     if (drive !== trip) return;
+    logPlanner(`no new route: ${err.message}`);
     trip.note = "Couldn't find a new route. Head back to the blue line when it's safe.";
-    say(trip.note);
   } finally {
     trip.rerouting = false;
     if (drive === trip) showDrive();
   }
 }
 
+// How long is left, as the cards count it: driving at a learner's pace, plus the practice
+function timeLeft() {
+  const r = drive.route;
+  let seconds = 0;
+  for (const s of r.spans) {
+    if (s.to <= drive.d) continue;
+    seconds += s.to > s.from ? s.seconds * Math.min(1, (s.to - Math.max(s.from, drive.d)) / (s.to - s.from)) : 0;
+  }
+  const practice = r.events.filter(e => e.kind === "stop" && !e.done && !e.stop.final)
+    .reduce((sum, e) => sum + (e.stop.minutes || 0) * 60, 0);
+  return seconds * TEST.slowdown + practice;
+}
+
+// Keep the map between the panel on top and the bar at the bottom
+function layoutDrive() {
+  if (!map || !drive) return;
+  const box = $("map"), top = `${$("drive").offsetHeight}px`, bottom = `${$("drive-bar").offsetHeight}px`;
+  if (box.style.top !== top || box.style.bottom !== bottom) {
+    box.style.top = top;
+    box.style.bottom = bottom;
+    map.invalidateSize({ pan: false });
+    if (drive.me) map.panTo(drive.me.getLatLng(), { animate: false });  // you, in the middle again
+  }
+}
+
 function showDrive() {
   if (!drive) return;
-  const ahead = drive.route.events.find(e => !e.done && e.kind !== "start");
+  const r = drive.route, icon = $("drive-icon");
+  const ahead = r && r.events.find(e => !e.done && e.kind !== "start");
   if (drive.finished || !ahead) {
+    const end = drive.stops[drive.stops.length - 1];
     $("drive-dist").textContent = "";
-    $("drive-text").textContent = drive.finished ? drive.stops[drive.stops.length - 1].arrived : "";
-    $("drive-next").textContent = drive.finished ? "Tap End to see the route again." : drive.note;
+    $("drive-text").textContent = drive.finished ? end.arrived : drive.note;
+    $("drive-next").textContent = drive.finished ? "Tap End to see the route again." : "";
+    icon.innerHTML = drive.finished ? (end.home ? '<span class="finish"></span>' : '<span class="end">B</span>') : "";
+    $("drive-eta").textContent = "";
+    layoutDrive();
     return;
   }
   $("drive-dist").textContent = shownDistance(ahead.d - drive.d);
   $("drive-text").textContent = ahead.kind === "stop" ? ahead.stop.show : ahead.words.show;
-  const stop = drive.route.events.find(e => e.kind === "stop" && !e.done);
-  $("drive-next").textContent = drive.note ||
-    (stop && stop !== ahead ? `Then ${lowerFirst(stop.stop.show)}, ${shownDistance(stop.d - drive.d)}` : "");
-  if (drive.note && drive.lastFix && drive.d > 30 && !drive.rerouting) drive.note = "";  // shown once moving
+  icon.innerHTML = ahead.kind !== "stop" ? arrowSvg(ahead.words.arrow)
+    : ahead.stop.final ? (ahead.stop.home ? '<span class="finish"></span>' : '<span class="end">B</span>')
+    : `<span class="num">${ahead.stop.number}</span>`;
+  const stop = r.events.find(e => e.kind === "stop" && !e.done);
+  const later = !stop || stop === ahead ? "" : stop.stop.final ? `${stop.stop.show} in ${shownDistance(stop.d - drive.d)}`
+    : `Stop ${stop.stop.number} in ${shownDistance(stop.d - drive.d)}: ${lowerFirst(stop.stop.name)} on ${stop.stop.street}`;
+  $("drive-next").textContent = drive.note || later;
+  const left = timeLeft(), miles = (r.path[r.path.length - 1].d - drive.d) / 1609.34;
+  $("drive-eta").replaceChildren(el("b", {}, shortDuration(left / 60)),
+    ` ${miles.toFixed(1)} mi, ${drive.stops[drive.stops.length - 1].eta} ${clock(Date.now() + left * 1000)}`);
+  if (drive.note.startsWith("Keep this page") && drive.d > 30) drive.note = "";  // shown until you're moving
+  layoutDrive();
+  showAhead(ahead);
 }
 
+// The map while driving: the road still to drive in blue with arrows along it, the next turn marked,
+// the stops, and you as an arrow pointing the way you're going
 function drawDrive() {
   if (!map) return;
   layer.clearLayers();
   markers.clear();
-  const points = [];
-  for (const leg of drive.legs) {
-    L.polyline(leg.line, { color: "#FFFFFF", weight: 12, opacity: 0.9, interactive: false }).addTo(layer);
-    L.polyline(leg.line, { color: "#0B57A4", weight: 7, interactive: false }).addTo(layer);
-    points.push(...leg.line);
+  layoutDrive();
+  drive.me = drive.ahead = drive.aheadCase = drive.arrows = drive.turnMark = null;
+  if (drive.route) {
+    const line = drive.route.path.map(p => [p.lat, p.lon]);
+    L.polyline(line, { color: "#8C949B", weight: 8, opacity: 0.8, interactive: false }).addTo(layer);
+    drive.aheadCase = L.polyline(line, { color: "#FFFFFF", weight: 15, interactive: false }).addTo(layer);
+    drive.ahead = L.polyline(line, { color: "#0B57A4", weight: 10, interactive: false }).addTo(layer);
+    drive.arrows = L.layerGroup().addTo(layer);
+    drive.turnMark = L.marker(line[0], { icon: L.divIcon({ className: "", html: '<span class="turn-dot"></span>', iconSize: [18, 18] }),
+                                         interactive: false, keyboard: false, opacity: 0 }).addTo(layer);
+    drive.stops.forEach(stop => {
+      const html = !stop.final ? `<span class="num">${stop.number}</span>`
+                 : stop.home ? '<span class="finish"></span>' : '<span class="end">B</span>';
+      L.marker([stop.at.lat, stop.at.lon], { icon: L.divIcon({ className: "", html, iconSize: [30, 30] }),
+                                             interactive: false, keyboard: false }).addTo(layer);
+    });
   }
-  drive.stops.forEach((stop, k) => {
-    const html = !stop.final ? `<span class="num">${k + 1}</span>`
-               : stop.home ? '<span class="finish"></span>' : '<span class="end">B</span>';
-    L.marker([stop.at.lat, stop.at.lon], { icon: L.divIcon({ className: "", html, iconSize: [30, 30] }),
-                                           interactive: false, keyboard: false }).addTo(layer);
-  });
-  drive.me = L.marker(drive.lastFix ? [drive.lastFix.lat, drive.lastFix.lon] : points[0] || [state.origin.lat, state.origin.lon], {
-    icon: L.divIcon({ className: "", html: '<span class="me"></span>', iconSize: [26, 26] }),
-    interactive: false, keyboard: false, zIndexOffset: 1000,
-  }).addTo(layer);
-  map.setView(drive.me.getLatLng(), 17, { animate: false });
+  const at = drive.lastFix ? [drive.lastFix.lat, drive.lastFix.lon]
+           : drive.route ? [drive.route.path[0].lat, drive.route.path[0].lon] : [state.origin.lat, state.origin.lon];
+  drive.me = L.marker(at, { icon: L.divIcon({ className: "", html: HEADING, iconSize: [40, 40] }),
+                            interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(layer);
+  map.setView(at, 17, { animate: false });
+  pointMe();
+}
+
+function placeMe(here) {
+  if (!map) return;
+  if (!drive.me) drawDrive();
+  drive.me.setLatLng([here.lat, here.lon]);
+  pointMe();
+  map.panTo([here.lat, here.lon], { animate: false });
+}
+function pointMe() {
+  const icon = drive.me && drive.me.getElement() && drive.me.getElement().querySelector(".heading");
+  if (icon) icon.style.transform = `rotate(${Math.round(drive.bearing)}deg)`;
+}
+
+// What's left of the route in blue, arrows along the next stretch of it, and a dot at the next turn
+function showAhead(next) {
+  if (!map || !drive.ahead) return;
+  const path = drive.route.path, here = pointAt(path, drive.d);
+  const rest = [[here.lat, here.lon], ...path.slice(here.i).map(p => [p.lat, p.lon])];
+  drive.ahead.setLatLngs(rest);
+  drive.aheadCase.setLatLngs(rest);
+  if (next && next.kind === "turn") {
+    drive.turnMark.setLatLng([next.lat, next.lon]);
+    drive.turnMark.setOpacity(1);
+  } else {
+    drive.turnMark.setOpacity(0);
+  }
+  if (Math.abs(drive.d - drive.arrowsAt) < 60) return;  // arrows moved every 60 m
+  drive.arrowsAt = drive.d;
+  drive.arrows.clearLayers();
+  const end = path[path.length - 1].d;
+  for (let d = drive.d + 60; d < Math.min(end, drive.d + DRIVE.arrows); d += 120) {
+    const p = pointAt(path, d);
+    L.marker([p.lat, p.lon], { icon: L.divIcon({ className: "", html: CHEVRON(p.bearing), iconSize: [14, 14] }),
+                               interactive: false, keyboard: false }).addTo(drive.arrows);
+  }
 }
 
 function finishDriving() {
@@ -1898,6 +2307,7 @@ function finishDriving() {
   drive.watch = null;
   if (drive.wake) drive.wake.release().catch(() => {});
   drive.wake = null;
+  logPlanner("finished");
   showDrive();
 }
 
@@ -1906,11 +2316,49 @@ function stopDriving() {
   if (drive.watch != null) navigator.geolocation.clearWatch(drive.watch);
   if (drive.wake) drive.wake.release().catch(() => {});
   if ("speechSynthesis" in window) speechSynthesis.cancel();
+  if (!drive.finished) logPlanner("ended");
   drive = null;
   document.body.classList.remove("driving");
   $("drive").hidden = $("drive-bar").hidden = true;
+  $("map").style.top = $("map").style.bottom = "";
   if (map) map.invalidateSize();
   render();
+}
+
+function setUpSettings() {
+  const button = $("settings-button"), panel = $("settings");
+  const open = show => {
+    panel.hidden = !show;
+    button.setAttribute("aria-expanded", String(show));
+    if (show) $("settings-title").focus();
+  };
+  button.addEventListener("click", () => open(panel.hidden));
+  $("settings-done").addEventListener("click", () => { open(false); button.focus(); });
+  panel.addEventListener("keydown", e => { if (e.key === "Escape") { open(false); button.focus(); } });
+  for (const radio of panel.querySelectorAll("input[name=repick]")) {
+    radio.checked = (radio.value === "change") === settings.repick;
+    radio.addEventListener("change", () => {
+      settings.repick = radio.value === "change";
+      saveSettings();
+    });
+  }
+  const log = $("keep-log");
+  log.checked = logging();
+  if (DEBUG) {  // the page address turns it on
+    log.disabled = true;
+    $("log-hint").textContent = "On while the page address ends in #debug.";
+  }
+  log.addEventListener("change", () => {
+    settings.log = log.checked;
+    saveSettings();
+    if (log.checked) {
+      logPlanner("log turned on");  // this visit's lines so far, kept from now on
+    } else {
+      plannerLog.length = 0;
+      try { localStorage.removeItem(LOG_KEY); } catch (err) { /* nothing kept */ }
+      hideLog();
+    }
+  });
 }
 
 function setUpDriving() {
@@ -1924,6 +2372,7 @@ function setUpDriving() {
   document.addEventListener("visibilitychange", () => {
     if (drive && !drive.finished && document.visibilityState === "visible") keepScreenOn();
   });
+  window.addEventListener("resize", () => { if (drive) layoutDrive(); });
 }
 
 // ---------- The map ----------
@@ -2049,6 +2498,10 @@ async function start() {
   setUpTestOptions();
   setUpTripOptions();
   setUpDriving();
+  setUpSettings();
+  if (logging()) {
+    logPlanner(`page opened: ${navigator.userAgent.match(/iPhone|Android|Windows|Mac/)?.[0] || "browser"}`);
+  }
   setUpMap();
   for (const b of document.querySelectorAll(".mode")) b.addEventListener("click", () => setMode(b.dataset.mode));
   $("locate").addEventListener("click", locate);
