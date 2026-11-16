@@ -229,6 +229,7 @@
   .real { display: grid; gap: 0; }
   .real .hint { margin: -6px 0 4px 34px; font-size: 15px; }
   .reveal { margin-top: 12px; }
+  .centre-drive { width: 100%; margin-top: -4px; }
   .step-title { margin: 0; font-size: 22px; line-height: 1.15; }
   .step-count { margin: 0 0 4px; color: var(--kerb); font-size: 15px; }
   .question { margin: 10px 0 0; font-size: 20px; font-weight: 700; line-height: 1.3; }
@@ -313,12 +314,6 @@
     <section id="settings" class="settings" aria-labelledby="settings-title" hidden>
       <h2 id="settings-title" class="settings-title" tabindex="-1">Settings</h2>
       <fieldset class="setting">
-        <legend>Practice spots, if you go off the route</legend>
-        <label class="radio"><input type="radio" name="repick" value="change"> Change them to suit the new route</label>
-        <label class="radio"><input type="radio" name="repick" value="keep"> Keep the same spots</label>
-        <p class="hint">For A to B. A mock test always keeps its stops, as an examiner would bring you back to the route.</p>
-      </fieldset>
-      <fieldset class="setting">
         <legend>Troubleshooting</legend>
         <label class="tick"><input id="keep-log" type="checkbox"> Keep a log</label>
         <p id="log-hint" class="hint">Route requests and everything said while driving, at the bottom of this page, to copy
@@ -349,6 +344,10 @@
   </header>
   <div id="kinds" class="kinds" role="group" aria-label="Type of spot"></div>
   <form id="test-options" class="options" aria-label="Mock test options" hidden>
+    <label class="option stack">
+      <span class="option-name">Start from</span>
+      <select id="start-from"></select>
+    </label>
     <div class="option stack">
       <span class="option-name" id="length-name">Length</span>
       <div class="choice" role="group" aria-labelledby="length-name">
@@ -398,6 +397,10 @@
       <div id="activities" class="choice wrap" role="group" aria-labelledby="practise-name"></div>
       <p class="hint">Leave them all off for the quickest way there, with no stops.</p>
     </div>
+    <div class="real">
+      <label class="tick"><input id="repick" type="checkbox"> Change the spots if I go off the route</label>
+      <p class="hint">They're picked again to suit your new route. Untick to keep the same ones.</p>
+    </div>
     <button id="plan" class="btn btn-go" type="submit">Plan my route</button>
   </form>
 </div>
@@ -441,8 +444,14 @@
 "use strict";
 
 // ---------- Settings you might change ----------
-// The spot files made by the notebook, one per area. Add a file name here when you add an area.
+// Spot files always loaded: the areas made one at a time with the notebook
 const SPOT_FILES = ["spots_sutton.geojson", "spots_peebles.geojson"];
+// Made by the batch notebook: the test centres, and which file has the spots round each. With it, only the
+// files near where you're looking are downloaded, so the page stays quick on a phone.
+const SPOT_INDEX = "spots_index.json";
+const LOAD_MILES = 16;   // download the spots round test centres this close to where you're looking
+const SAME_SPOT = 30;    // metres: a spot of the same type this close to one already loaded is the same spot
+const START_CHOICES = 12; // test centres offered to start a mock test from, nearest first
 const PER_GROUP = 3;     // spots of each type shown under "All"
 const MAX_LIST = 40;     // most spots shown for one type
 const NEAR_MILES = 15;   // lists stop at this distance (unless nothing is closer)
@@ -483,7 +492,7 @@ const DEBUG = location.hash === "#debug";  // the log, whatever the settings say
 
 // Settings, kept on this phone
 const SETTINGS_KEY = "driving-practice-settings";
-const settings = { repick: true, log: false, realTest: true, showRoute: false, ...loadSettings() };
+const settings = { repick: true, log: false, realTest: true, showRoute: false, testCentre: "", ...loadSettings() };
 function loadSettings() {
   try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"); } catch (err) { return {}; }
 }
@@ -551,7 +560,7 @@ const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
 const REDUCED_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const state = {
-  spots: [], roundabouts: [], origin: null, originText: "", kind: "all", mode: "spots", result: null,
+  spots: [], roundabouts: [], index: null, origin: null, originText: "", kind: "all", mode: "spots", result: null,
   test: { minutes: 35, manoeuvre: "surprise", emergency: "real", hill: true, roundabouts: true },
   trip: { activities: new Set(["parallel_park", "hill_start"]), dest: null, destText: "", result: null, used: new Set() },
 };
@@ -700,26 +709,88 @@ function toSpot(feature, i, file) {
     why: p.why || "", note: p.note || "", also: p.also || "",
     lat: Number(p.lat ?? lat), lon: Number(p.lon ?? lon),
     navLat: Number(p.nav_lat ?? p.lat ?? lat), navLon: Number(p.nav_lon ?? p.lon ?? lon),
-    heading: Number(p.heading || 0), nearSchool: Boolean(p.near_school), area: areaOf(file),
+    heading: Number(p.heading || 0), nearSchool: Boolean(p.near_school), area: p.area || areaOf(file),
   };
 }
 
+async function spotFile(file) {
+  const res = await fetch(file, { cache: "no-cache" });
+  if (!res.ok) throw new Error(`${file}: ${res.status}`);
+  const data = await res.json();
+  return (data.features || []).map((f, i) => toSpot(f, i, file));
+}
+
+// Spots kept so far, by type and place. Areas overlap, so the same spot can be in two files: it's kept once.
+const spotCells = new Map();
+function addSpot(s) {
+  if ((s.kind !== "roundabout" && !KIND[s.kind]) || !Number.isFinite(s.lat) || !Number.isFinite(s.lon)) return;
+  const row = Math.round(s.lat * 1000), col = Math.round(s.lon * 600);  // cells about 100 m across
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      const near = spotCells.get(`${s.kind} ${row + dr} ${col + dc}`) || [];
+      if (near.some(t => milesBetween(s, t) * 1609.344 <= SAME_SPOT)) return;
+    }
+  }
+  const key = `${s.kind} ${row} ${col}`;
+  spotCells.set(key, [...(spotCells.get(key) || []), s]);
+  (s.kind === "roundabout" ? state.roundabouts : state.spots).push(s);
+}
+
 async function loadSpots() {
-  const results = await Promise.allSettled(SPOT_FILES.map(async file => {
-    const res = await fetch(file, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`${file}: ${res.status}`);
-    const data = await res.json();
-    return (data.features || []).map((f, i) => toSpot(f, i, file));
-  }));
+  const results = await Promise.allSettled(SPOT_FILES.map(spotFile));
   const missing = [];
   results.forEach((r, i) => {
     if (r.status !== "fulfilled") { missing.push(SPOT_FILES[i]); return; }
-    for (const s of r.value) {
-      if (s.kind === "roundabout") state.roundabouts.push(s);
-      else if (KIND[s.kind]) state.spots.push(s);
-    }
+    r.value.forEach(addSpot);
   });
   return missing;
+}
+
+// The batch notebook's index, if it's been uploaded
+async function loadIndex() {
+  try {
+    const res = await fetch(SPOT_INDEX, { cache: "no-cache" });
+    if (!res.ok) return false;
+    const data = await res.json();
+    if (!data || !Array.isArray(data.centres)) return false;
+    state.index = data;
+    return true;
+  } catch (err) {
+    return false;  // not uploaded yet, or not readable: the files above still work
+  }
+}
+
+// The index's test centres with spots round them
+const covered = () => (state.index ? state.index.centres.filter(c => c.file && Number.isFinite(c.lat)) : []);
+
+// Downloads the spot files for the test centres near any of these points. Gives null if they're all in
+// already, otherwise a promise of the files that wouldn't load (tried again next time).
+const fileLoads = new Map(), loadedFiles = new Set();
+function loadSpotsNear(points, miles = LOAD_MILES) {
+  const reach = ((state.index && state.index.radius_m) || 2000) / 1609.344;
+  const files = new Set(covered().filter(c => points.some(p => p && milesBetween(p, c) <= miles + reach)).map(c => c.file));
+  const waiting = [...files].filter(file => !loadedFiles.has(file));
+  if (!waiting.length) return null;
+  return Promise.all(waiting.map(file => {
+    if (!fileLoads.has(file)) {
+      fileLoads.set(file, spotFile(file).then(list => {
+        list.forEach(addSpot);
+        loadedFiles.add(file);
+        return null;
+      }, err => {
+        fileLoads.delete(file);
+        logPlanner(`couldn't load ${file}: ${err && err.message}`);
+        return file;
+      }));
+    }
+    return fileLoads.get(file);
+  })).then(results => results.filter(Boolean));
+}
+
+// Points every few miles along the straight line from a to b, to get the spots along the way
+function alongWay(a, b, step = 4) {
+  const n = Math.max(1, Math.ceil(milesBetween(a, b) / step));
+  return Array.from({ length: n + 1 }, (_, i) => ({ lat: a.lat + (b.lat - a.lat) * i / n, lon: a.lon + (b.lon - a.lon) * i / n }));
 }
 
 // ---------- Choosing a start point ----------
@@ -784,7 +855,7 @@ async function lookUp(text, near = null) {
   if (!places.length) return null;
   const wanted = text.trim().toLowerCase();
   const exact = places.filter(p => [p.name_1, p.name_2].some(n => n && n.toLowerCase() === wanted));
-  const refs = near ? [near] : state.spots;
+  const refs = near ? [near] : (covered().length ? covered() : state.spots);
   const miles = p => refs.length ? Math.min(...refs.map(q => milesBetween({ lat: p.latitude, lon: p.longitude }, q))) : 0;
   const size = p => PLACE_RANK.includes(p.local_type) ? PLACE_RANK.indexOf(p.local_type) : PLACE_RANK.length;
   const score = p => miles(p) + 2 * size(p);  // nearer first; between places about as near, the bigger one
@@ -824,7 +895,19 @@ function setOrigin(origin, text = "") {
   state.originText = text;  // what was searched for, so Build my test can tell if the box has changed
   state.result = null;      // a mock test belongs to its start point
   state.trip.result = null; // and so does a route
+  const loading = loadSpotsNear([origin]);
+  const loaded = failed => {
+    if (state.origin !== origin || state.mode !== "spots") return;
+    render();
+    if (failed.length) setStatus(`Couldn't load ${listOf(failed)}, so some spots near here are missing.`, true);
+  };
+  if (loading && state.mode === "spots") {  // the list needs them: wait
+    setStatus(`Getting the practice spots near ${where(origin)}...`);
+    loading.then(loaded);
+    return;
+  }
   render();
+  if (loading) loading.then(loaded);
 }
 
 // ---------- The spot list ----------
@@ -1086,8 +1169,8 @@ function spreadOut(places, n) {  // a mix of near and far, not all bunched toget
 }
 
 // What this test will include, and the nearest few spots for each part of it
-function planTest() {
-  const o = state.origin, t = state.test, notes = [], items = [];
+function planTest(o) {
+  const t = state.test, notes = [], items = [];
   const nearest = kind => state.spots.filter(s => s.kind === kind)
     .map(s => ({ ...s, miles: milesBetween(o, s) })).filter(s => s.miles <= TEST.maxMiles)
     .sort((a, b) => a.miles - b.miles).slice(0, TEST.perType);
@@ -1198,8 +1281,7 @@ function decodeLine(text, precision = 6) {  // the planner's compressed route sh
   return points;
 }
 
-async function routeFor(pick, uphill = true, end = state.origin) {
-  const o = state.origin;
+async function routeFor(pick, uphill = true, end = state.origin, o = state.origin) {
   const locations = [{ lat: coord(o.lat), lon: coord(o.lon), type: "break" }];
   for (const part of pick.order) {
     const loc = { lat: coord(part.spot.navLat), lon: coord(part.spot.navLon), type: part.via ? "through" : "break" };
@@ -1246,14 +1328,14 @@ function legsFrom(data, expected) {
 // Ask for the route. If the planner can't make it, try again with other spots (after two refusals,
 // without asking to arrive uphill). If it comes out well off the length asked for, the table has learned
 // from it, so fit again allowing for how far out it was, and keep whichever test is closest.
-async function routeTest(plan, index, table) {
+async function routeTest(plan, index, table, start) {
   const avoid = new Set();
   let best = null, problem = null, scale = 1;
   for (let attempt = 1; attempt <= TEST.attempts; attempt++) {
     const pick = fitLength(plan, index, table, { avoid, scale });
     let legs;
     try {
-      legs = await routeFor(pick, !problem || attempt < TEST.attempts);
+      legs = await routeFor(pick, !problem || attempt < TEST.attempts, start, start);
     } catch (err) {
       if (stopTrying(err)) {
         if (best) break;
@@ -1289,6 +1371,11 @@ function routerProblem(err, {
 function noSpotsNear(o) {
   const text = `There are no practice spots within ${TEST.maxMiles} miles of ${where(o)} yet.`;
   const nearest = state.spots.map(s => ({ s, miles: milesBetween(o, s) })).sort((a, b) => a.miles - b.miles)[0];
+  const centre = covered().map(c => ({ c, miles: milesBetween(o, c) })).sort((a, b) => a.miles - b.miles)[0];
+  if (centre && (!nearest || centre.miles < nearest.miles)) {
+    return `${text} The nearest are around ${centre.c.short || centre.c.name} test centre, ` +
+           `${formatMiles(centre.miles)} miles away, so search for a postcode there.`;
+  }
   if (!nearest) return text;
   return `${text} The nearest are ${formatMiles(nearest.miles)} miles away` +
          (nearest.s.area ? `, around ${nearest.s.area}, so search for a postcode there.` : ".");
@@ -1302,30 +1389,39 @@ async function buildTest(event) {
     // A postcode or town typed in the box but not searched for: start from there
     const typed = $("place").value.trim();
     if (typed && typed !== state.originText && !(await startFrom(typed))) return;
-    if (!state.origin) {
-      setStatus("Use your location, or search for a postcode or town, to choose where the test starts.", true);
+    const start = testStart();
+    if (!start) {
+      setStatus("Use your location, search for a postcode or town, or choose a test centre, to choose where the test starts.", true);
       return;
     }
-    const plan = planTest();
+    const loading = loadSpotsNear([start]);
+    if (loading) {
+      setStatus(`Getting the practice spots near ${where(start)}...`);
+      await loading;
+    }
+    const plan = planTest(start);
     if (!plan.items.length) {
-      setStatus(noSpotsNear(state.origin), true);
+      setStatus(noSpotsNear(start), true);
       return;
     }
     setStatus("Planning your test...");
     const seen = new Set();
-    const points = [{ id: "start", navLat: state.origin.lat, navLon: state.origin.lon },
+    const points = [{ id: "start", navLat: start.lat, navLon: start.lon },
                     ...plan.points, ...plan.roundabouts, ...plan.fillers].filter(p => !seen.has(p.id) && seen.add(p.id));
     const index = new Map(points.map((p, i) => [p.id, i]));
     const table = tableFor(points);
     await askTimes(table, likelyPlaces(plan, index, table));
     setStatus("Working out the route...");
-    const { pick, legs, seconds } = await routeTest(plan, index, table);
+    const { pick, legs, seconds } = await routeTest(plan, index, table, start);
     pick.minutes = Math.round(seconds * TEST.slowdown / 60 + pick.minutesStopped);  // from the real route
     if (pick.minutes < 0.8 * state.test.minutes) {
       plan.notes.push(`There aren't enough practice spots${state.test.roundabouts ? " and roundabouts" : ""} within ` +
                       `${TEST.maxMiles} miles of here to make it ${state.test.minutes} minutes long.`);
     }
-    state.result = { plan, pick, legs, real: settings.realTest, revealed: settings.showRoute };
+    // all the spots some way off (from a test centre without spots around it, say): say why it's long
+    const long = pick.minutes > 1.2 * state.test.minutes
+      ? `The practice spots are all some way from ${where(start)}, so it's longer than ${state.test.minutes} minutes.` : "";
+    state.result = { plan, pick, legs, start, long, real: settings.realTest, revealed: settings.showRoute };
     renderTest();
     scrollTo("map");
   } catch (err) {
@@ -1366,11 +1462,12 @@ function stopCard(number, title, kindLine, text, leg, dest, vias, extra = [], on
 function renderTest() {
   const list = $("list");
   list.replaceChildren();
-  const o = state.origin, r = state.result;
+  fillStartChoices();
+  const r = state.result, o = r ? r.start : testStart();
   if (!r) {
     drawMarkers([], o);
     setStatus(o ? `The test will start from ${where(o)}. Choose your options, then tap Build my test.`
-                : "Use your location, or search for a postcode or town, to choose where the test starts.");
+                : "Use your location, search for a postcode or town, or choose a test centre, to choose where the test starts.");
     return;
   }
   const hidden = r.real && !r.revealed;  // like the real test, where the route isn't known beforehand
@@ -1386,13 +1483,16 @@ function renderTest() {
     el("article", { className: "sign summary" },
       el("h2", { className: "summary-title" }, r.driven ? "The test you drove" : "Your mock test"),
       el("p", { className: "summary-time" }, `About ${r.pick.minutes} minutes, ${miles.toFixed(1)} miles`),
+      r.long ? el("p", { className: "note" }, r.long) : null,
       hidden ? el("p", { className: "why" }, "The route, the manoeuvre and whether there's an emergency stop are a " +
                                              "surprise, like the real test.")
              : includes ? el("p", { className: "why" }, includes) : null,
       ...(hidden ? [] : r.plan.notes.map(n => el("p", { className: "note" }, n))),
       hidden ? el("button", { className: "btn reveal", type: "button",
                               onclick: () => { r.revealed = true; renderTest(); } }, "Show the route") : null)));
-  list.append(el("section", { className: "group", id: "start-test" }, r.real ? beforeYouDrive(r) : startButton(() => driveTest(r))));
+  list.append(el("section", { className: "group", id: "start-test" }, r.real ? beforeYouDrive(r) : startButton(() => driveTest(r)),
+    o.centre && !(r.before && !r.driven) ? el("button", { className: "btn centre-drive", type: "button",
+      onclick: () => driveToCentre(o.centre) }, `Drive to ${o.centre.short} test centre first`) : null));
   if (hidden) {
     drawMarkers([], o);
     setStatus(`Your mock test is ready: about ${r.pick.minutes} minutes from ${where(o)}.`);
@@ -1414,7 +1514,8 @@ function renderTest() {
     ], () => driveTest(r, i)));
   });
   const home = { navLat: o.lat, navLon: o.lon };
-  section.append(stopCard(stops.length + 1, "Back to the start", "", "", r.legs[stops.length], home,
+  section.append(stopCard(stops.length + 1, o.centre ? `Back to ${o.centre.short} test centre` : "Back to the start", "", "",
+                          r.legs[stops.length], home,
                           legVias[stops.length], [], () => driveTest(r, stops.length)));
   section.append(el("div", { className: "rebuild" },
     el("button", { className: "btn", type: "button", onclick: () => buildTest() }, "Build another")));
@@ -1488,6 +1589,16 @@ function setUpTestOptions() {
   $("emergency").addEventListener("change", e => { state.test.emergency = e.target.value; });
   $("hill").addEventListener("change", e => { state.test.hill = e.target.checked; });
   $("roundabouts").addEventListener("change", e => { state.test.roundabouts = e.target.checked; });
+  // Where it starts: a test centre is kept on the phone, as it's usually the one you're booked at
+  fillStartChoices();
+  $("start-from").addEventListener("change", e => {
+    settings.testCentre = e.target.value;
+    saveSettings();
+    const c = testStart();
+    if (c && c.centre) loadSpotsNear([c]);  // get its spots now, ready for Build my test
+    if (state.result && !drive) state.result = null;  // a test from somewhere else
+    if (state.mode === "test") renderTest();
+  });
   // Like the real test, and whether to see the route first: kept on the phone
   const real = $("real-test"), show = $("show-route");
   real.checked = settings.realTest;
@@ -1677,9 +1788,15 @@ async function buildTrip(event) {
       scrollTo("map");
       return;
     }
+    const loading = loadSpotsNear(alongWay(state.origin, t.dest), TRIP.maxMiles + 2);
+    if (loading) {
+      setStatus("Getting the practice spots along the way...");
+      await loading;
+    }
     const plan = planTrip();
     if (!plan.items.length) {
-      const areas = listOf([...new Set(state.spots.map(s => s.area).filter(Boolean))]);
+      const names = [...new Set(state.spots.map(s => s.area).filter(Boolean))];
+      const areas = !state.index && names.length <= 4 ? listOf(names) : "";
       setStatus(`There are no practice spots near this route yet.${areas ? ` So far there are spots around ${areas}.` : ""}`, true);
       return;
     }
@@ -1806,7 +1923,63 @@ function setUpTripOptions() {
     });
     $("activities").append(b);
   }
+  // off the route: new spots to suit the new route, or the same ones (kept on the phone)
+  $("repick").checked = settings.repick;
+  $("repick").addEventListener("change", e => {
+    settings.repick = e.target.checked;
+    saveSettings();
+  });
   $("trip-options").addEventListener("submit", buildTrip);
+}
+
+// ---------- Test centres ----------
+// DVSA car test centres checked by hand, from DVSA's test centre finder, placed by their postcodes. The batch
+// notebook's index adds every other one in England, Scotland and Wales.
+const TEST_CENTRES = [
+  { name: "Morden (London)", short: "Morden", address: "10 Tudor Drive, Morden SM4 4PE", lat: 51.386583, lon: -0.212444 },
+  { name: "Mitcham (London)", short: "Mitcham", address: "Redhouse Road, Croydon CR0 3AQ", lat: 51.390049, lon: -0.137064 },
+  { name: "Tolworth (London)", short: "Tolworth", address: "Douglas House, 1B Douglas Road, Tolworth KT6 7RZ",
+    lat: 51.382972, lon: -0.293566 },
+  { name: "Peebles", short: "Peebles", address: "Rosetta Road, Peebles EH45 8DN", lat: 55.657469, lon: -3.194137 },
+  { name: "Galashiels", short: "Galashiels", address: "1 Croft Street, Galashiels TD1 3BH", lat: 55.61259, lon: -2.802674 },
+  { name: "Edinburgh (Currie)", short: "Currie", address: "13-15 Bryce Road, Currie EH14 5LT", lat: 55.899917, lon: -3.308236 },
+];
+
+// These, then the index's (those placed from their address, not just their town)
+function allCentres() {
+  const have = new Set(TEST_CENTRES.map(c => c.name));
+  const more = (state.index ? state.index.centres : [])
+    .filter(c => c.found !== "town" && !have.has(c.name) && Number.isFinite(c.lat) && Number.isFinite(c.lon))
+    .map(c => ({ name: c.name, short: c.short || c.name, address: c.address || "", lat: c.lat, lon: c.lon }));
+  return [...TEST_CENTRES, ...more];
+}
+
+// Where a mock test starts and ends: the test centre chosen, or where you are (or searched for)
+function testStart() {
+  const c = settings.testCentre ? allCentres().find(x => x.name === settings.testCentre) : null;
+  return c ? { lat: c.lat, lon: c.lon, label: `${c.short} test centre`, centre: c } : state.origin;
+}
+
+// The choices: where you are, then the nearest test centres within 25 miles of it (all of them, A to Z,
+// before you've chosen a place)
+function fillStartChoices() {
+  const select = $("start-from"), o = state.origin;
+  const near = allCentres().map(c => ({ c, miles: o ? milesBetween(o, c) : null }))
+    .filter(x => x.miles == null || x.miles <= 25 || x.c.name === settings.testCentre)
+    .sort((a, b) => (a.miles || 0) - (b.miles || 0) || a.c.name.localeCompare(b.c.name))
+    .filter((x, i) => !o || i < START_CHOICES || x.c.name === settings.testCentre);
+  select.replaceChildren(
+    el("option", { value: "" }, o ? sentence(where(o)) : "Where you are, once you've chosen"),
+    ...near.map(({ c, miles }) => el("option", { value: c.name },
+      `${c.short} test centre${miles == null ? "" : `, ${formatMiles(miles)} mi`}`)));
+  select.value = settings.testCentre;
+}
+
+function driveToCentre(c) {
+  startDriving({ legs: null, vias: [[]], stops: [{
+    final: true, show: `Arrive at ${c.short} test centre`, ahead: `you'll arrive at ${c.short} test centre`, eta: "arriving",
+    arrived: `You've arrived at ${c.short} test centre. Start the test when you're ready.`, at: { lat: c.lat, lon: c.lon },
+  }] });
 }
 
 // ---------- Like the real test ----------
@@ -2271,14 +2444,15 @@ function driveStop(part, number, pinned = false) {
 // "from": which stop's Drive there was tapped, if one was. A mock test keeps its stops if you go off the
 // route, as an examiner would; A to B picks them again to suit where you are.
 function driveTest(r, from = null) {
-  const o = state.origin, stops = [], vias = [[]];
+  const o = r.start || state.origin, stops = [], vias = [[]];
   for (const part of r.pick.order) {
     if (part.via) { vias[vias.length - 1].push(part.spot); continue; }
     stops.push(driveStop(part, stops.length + 1));
     vias.push([]);
   }
-  stops.push({ final: true, home: true, show: "Back to the start", ahead: "you'll be back at the start", eta: "back at",
-               arrived: "You're back at the start. That's the end of your mock test.", at: { lat: o.lat, lon: o.lon } });
+  const back = o.centre ? "the test centre" : "the start";
+  stops.push({ final: true, home: true, show: `Back to ${back}`, ahead: `you'll be back at ${back}`, eta: "back at",
+               arrived: `You're back at ${back}. That's the end of your mock test.`, at: { lat: o.lat, lon: o.lon } });
   // like the real test, from the start only (a stop's Drive there is practice)
   const test = r.real && from == null && r.before ? {
     showMe: r.before.showMe, extras: [{ kind: "showme" }, { kind: "pullup", type: "angle" }, { kind: "pullup", type: "normal" }],
@@ -2765,7 +2939,9 @@ function drawDrive() {
     });
   }
   const at = drive.lastFix ? [drive.lastFix.lat, drive.lastFix.lon]
-           : drive.route ? [drive.route.path[0].lat, drive.route.path[0].lon] : [state.origin.lat, state.origin.lon];
+           : drive.route ? [drive.route.path[0].lat, drive.route.path[0].lon]
+           : state.origin ? [state.origin.lat, state.origin.lon]
+           : [drive.stops[drive.stops.length - 1].at.lat, drive.stops[drive.stops.length - 1].at.lon];
   drive.me = L.marker(at, { icon: L.divIcon({ className: "", html: HEADING, iconSize: [40, 40] }),
                             interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(layer);
   map.setView(at, 17, { animate: false });
@@ -2854,13 +3030,6 @@ function setUpSettings() {
   button.addEventListener("click", () => open(panel.hidden));
   $("settings-done").addEventListener("click", () => { open(false); button.focus(); });
   panel.addEventListener("keydown", e => { if (e.key === "Escape") { open(false); button.focus(); } });
-  for (const radio of panel.querySelectorAll("input[name=repick]")) {
-    radio.checked = (radio.value === "change") === settings.repick;
-    radio.addEventListener("change", () => {
-      settings.repick = radio.value === "change";
-      saveSettings();
-    });
-  }
   const log = $("keep-log");
   log.checked = logging();
   if (DEBUG) {  // the page address turns it on
@@ -2976,7 +3145,7 @@ function drawRoute(r, { end = null, others = [], choose = null } = {}) {
     L.polyline(leg.line, { color: "#0B57A4", weight: 5, interactive: false }).addTo(layer);
     points.push(...leg.line);
   }
-  addStart(state.origin, points);
+  addStart(r.start || state.origin, points);
   if (end) {
     L.marker([end.lat, end.lon], {
       icon: L.divIcon({ className: "", html: '<span class="end">B</span>', iconSize: [30, 30] }),
@@ -3026,7 +3195,8 @@ async function start() {
   $("locate").addEventListener("click", locate);
   $("search").addEventListener("submit", search);
   const missing = await loadSpots();
-  if (!state.spots.length) {
+  const indexed = await loadIndex();
+  if (!state.spots.length && !covered().length) {
     setStatus(location.protocol === "file:"
       ? "Open this page from its web address, not by double-clicking the file. The setup steps explain how."
       : `Couldn't load the spots. Check ${SPOT_FILES.join(" and ")} are uploaded next to index.html.`, true);
@@ -3034,7 +3204,9 @@ async function start() {
   }
   setStatus(missing.length
     ? `Couldn't load ${missing.join(" and ")}, so some areas are missing. Use your location, or search for a postcode or town.`
-    : `${state.spots.length} spots loaded. Use your location, or search for a postcode or town.`, missing.length > 0);
+    : indexed && covered().length
+      ? `Practice spots are ready round ${covered().length} test centres so far. Use your location, or search for a postcode or town.`
+      : `${state.spots.length} spots loaded. Use your location, or search for a postcode or town.`, missing.length > 0);
   render();
   // If location was allowed before, use it straight away
   if (navigator.permissions && navigator.permissions.query) {
