@@ -450,7 +450,8 @@ const SPOT_FILES = ["spots_sutton.geojson", "spots_peebles.geojson"];
 // Made by the batch notebook: the test centres, and which file has the spots round each. With it, only the
 // files near where you're looking are downloaded, so the page stays quick on a phone.
 const SPOT_INDEX = "spots_index.json";
-const LOAD_MILES = 16;   // download the spots round test centres this close to where you're looking
+const LOAD_MILES = 6;    // download the spot files of the places (test centres and practice areas) this close
+const LOAD_FAR = 16;     // to where you're looking, or this close if none are
 const SAME_SPOT = 30;    // metres: a spot of the same type this close to one already loaded is the same spot
 const START_CHOICES = 12; // test centres offered to start a mock test from, nearest first
 const PER_GROUP = 3;     // spots of each type shown under "All"
@@ -780,15 +781,28 @@ async function loadIndex() {
   }
 }
 
-// The index's test centres with spots round them
-const covered = () => (state.index ? state.index.centres.filter(c => c.file && Number.isFinite(c.lat)) : []);
+// "320 test centres and 1,000 other places"
+function readyAround() {
+  const centres = covered().filter(isCentre).length, others = covered().length - centres;
+  const count = (n, word) => `${n.toLocaleString("en-GB")} ${word}${n === 1 ? "" : "s"}`;
+  return others ? `${count(centres, "test centre")} and ${count(others, "other place")}` : count(centres, "test centre");
+}
 
-// Downloads the spot files for the test centres near any of these points. Gives null if they're all in
-// already, otherwise a promise of the files that wouldn't load (tried again next time).
+// The index's places with spots round them: its test centres, and (from version 2) its practice areas, which
+// fill in the towns and cities between test centres. Practice areas have no name, just the nearest place's.
+const covered = () => (state.index ? [...state.index.centres, ...(state.index.areas || [])]
+  .filter(c => c.file && Number.isFinite(c.lat)) : []);
+const isCentre = c => Boolean(c.name);
+
+// Downloads the spot files for the places near any of these points (or, with none that near, further out).
+// Gives null if they're all in already, otherwise a promise of the files that wouldn't load (tried again next time).
 const fileLoads = new Map(), loadedFiles = new Set();
 function loadSpotsNear(points, miles = LOAD_MILES) {
   const reach = ((state.index && state.index.radius_m) || 2000) / 1609.344;
-  const files = new Set(covered().filter(c => points.some(p => p && milesBetween(p, c) <= miles + reach)).map(c => c.file));
+  const near = most => covered().filter(c => points.some(p => p && milesBetween(p, c) <= most + reach));
+  let places = near(miles);
+  if (!places.length && miles < LOAD_FAR) places = near(LOAD_FAR);
+  const files = new Set(places.map(c => c.file));
   const waiting = [...files].filter(file => !loadedFiles.has(file));
   if (!waiting.length) return null;
   return Promise.all(waiting.map(file => {
@@ -919,7 +933,8 @@ function setOrigin(origin, text = "") {
   const loaded = failed => {
     if (state.origin !== origin || state.mode !== "spots") return;
     render();
-    if (failed.length) setStatus(`Couldn't load ${listOf(failed)}, so some spots near here are missing.`, true);
+    if (failed.length) setStatus("Couldn't download some of the practice spots near here, so they're missing. " +
+                                 "Check your connection, then search again.", true);
   };
   if (loading && state.mode === "spots") {  // the list needs them: wait
     setStatus(`Getting the practice spots near ${where(origin)}...`);
@@ -1397,7 +1412,7 @@ function noSpotsNear(o) {
   const nearest = state.spots.map(s => ({ s, miles: milesBetween(o, s) })).sort((a, b) => a.miles - b.miles)[0];
   const centre = covered().map(c => ({ c, miles: milesBetween(o, c) })).sort((a, b) => a.miles - b.miles)[0];
   if (centre && (!nearest || centre.miles < nearest.miles)) {
-    return `${text} The nearest are around ${centre.c.short || centre.c.name} test centre, ` +
+    return `${text} The nearest are around ${centre.c.short || centre.c.name}${isCentre(centre.c) ? " test centre" : ""}, ` +
            `${formatMiles(centre.miles)} miles away, so search for a postcode there.`;
   }
   if (!nearest) return text;
@@ -3305,7 +3320,7 @@ async function start() {
   setStatus(missing.length
     ? `Couldn't load ${missing.join(" and ")}, so some areas are missing. Use your location, or search for a postcode or town.`
     : indexed && covered().length
-      ? `Practice spots are ready round ${covered().length} test centres so far. Use your location, or search for a postcode or town.`
+      ? `Practice spots are ready round ${readyAround()} so far. Use your location, or search for a postcode or town.`
       : `${state.spots.length} spots loaded. Use your location, or search for a postcode or town.`, missing.length > 0);
   render();
   // If location was allowed before, use it straight away
