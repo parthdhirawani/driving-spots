@@ -124,6 +124,7 @@
     display: flex; align-items: center; gap: 10px;
     margin: 0 0 12px; font-size: 21px; line-height: 1.2;
   }
+  .group-note { margin: -4px 0 12px; color: var(--kerb); }
   .symbol { display: inline-flex; width: 28px; height: 28px; flex: none; }
   .symbol svg { width: 100%; height: 100%; }
   .sign {
@@ -720,10 +721,29 @@ async function spotFile(file) {
   return (data.features || []).map((f, i) => toSpot(f, i, file));
 }
 
+// Car parks for bay parking. Ones you pay for are left out: OpenStreetMap's fee tag puts "Pay to park" in the
+// note. So are ones it gives no fee for that nearly always charge (stations, the big car park firms), and
+// hospitals. "Car park off X" is named after its street, so a "Station Road" there doesn't count.
+const PAID_NAME = /\bstation\b|\bncp\b|q-park|apcoa|euro car parks|\bsaba\b|\bindigo\b|multi-?storey/i;
+function leftOut(s) {
+  if (s.kind !== "bay_park") return false;
+  const name = /^car park off /i.test(s.street) ? "" : s.street;
+  return /pay to park/i.test(s.note) || /hospital/i.test(name) || (PAID_NAME.test(name) && !/free to park/i.test(s.note));
+}
+// Free car parks and supermarket ones come first: any other counts as this many miles further away
+const CAR_PARK_HANDICAP = 1;
+const goodCarPark = s => /^supermarket/i.test(s.note) || /retail park|shopping park/i.test(s.street) ||
+  (/free to park/i.test(s.note) && !/customers only|visitors only/i.test(s.note));
+const handicap = s => (s.kind === "bay_park" && !goodCarPark(s) ? CAR_PARK_HANDICAP : 0);
+const preferred = (a, b) => a.miles + handicap(a) - (b.miles + handicap(b));
+const CAR_PARK_NOTE = "Free and supermarket car parks come first. Paid, station and hospital car parks are left out. " +
+  "No map shows which ones welcome learners, so go when it's quiet and keep to any time limit.";
+
 // Spots kept so far, by type and place. Areas overlap, so the same spot can be in two files: it's kept once.
 const spotCells = new Map();
 function addSpot(s) {
   if ((s.kind !== "roundabout" && !KIND[s.kind]) || !Number.isFinite(s.lat) || !Number.isFinite(s.lon)) return;
+  if (leftOut(s)) return;
   const row = Math.round(s.lat * 1000), col = Math.round(s.lon * 600);  // cells about 100 m across
   for (let dr = -1; dr <= 1; dr++) {
     for (let dc = -1; dc <= 1; dc++) {
@@ -953,13 +973,14 @@ function render() {
   const shown = [];
   const kinds = state.kind === "all" ? KINDS : [KIND[state.kind]];
   for (const kind of kinds) {
-    const ofKind = near.filter(s => s.kind === kind.id);
+    const ofKind = near.filter(s => s.kind === kind.id).sort(preferred);
     if (!ofKind.length) continue;
     const close = ofKind.filter(s => s.miles <= NEAR_MILES);
     const pool = close.length ? close : ofKind.slice(0, PER_GROUP);  // nothing close: the nearest few anyway
     const take = pool.slice(0, state.kind === "all" ? PER_GROUP : MAX_LIST);
     shown.push(...take);
-    const section = el("section", { className: "group" }, groupTitle(kind), ...take.map(signFor));
+    const section = el("section", { className: "group" }, groupTitle(kind),
+      kind.id === "bay_park" ? el("p", { className: "group-note" }, CAR_PARK_NOTE) : null, ...take.map(signFor));
     if (state.kind === "all" && pool.length > take.length) {
       section.append(el("button", { className: "more", type: "button", onclick: () => chooseKind(kind.id) },
                         `Show all ${pool.length} ${kind.plural}`));
@@ -1171,9 +1192,12 @@ function spreadOut(places, n) {  // a mix of near and far, not all bunched toget
 // What this test will include, and the nearest few spots for each part of it
 function planTest(o) {
   const t = state.test, notes = [], items = [];
-  const nearest = kind => state.spots.filter(s => s.kind === kind)
-    .map(s => ({ ...s, miles: milesBetween(o, s) })).filter(s => s.miles <= TEST.maxMiles)
-    .sort((a, b) => a.miles - b.miles).slice(0, TEST.perType);
+  const nearest = kind => {
+    const all = state.spots.filter(s => s.kind === kind)
+      .map(s => ({ ...s, miles: milesBetween(o, s) })).filter(s => s.miles <= TEST.maxMiles);
+    const good = all.filter(s => !handicap(s));  // a free or supermarket car park, if there's one in reach
+    return (good.length ? good : all).sort(preferred).slice(0, TEST.perType);
+  };
   const wanted = t.manoeuvre === "surprise" ? Object.keys(MANOEUVRES) : [t.manoeuvre];
   const possible = wanted.filter(type => nearest(MANOEUVRES[type].kind).length);
   if (possible.length) {
@@ -1646,7 +1670,7 @@ function planTrip() {
   for (const kind of new Set(chosen.map(type => ACTIVITIES[type].kind))) {
     const types = chosen.filter(type => ACTIVITIES[type].kind === kind);
     const options = state.spots.filter(s => s.kind === kind && offLine(a, b, s) <= width)
-      .map(s => ({ s, cost: milesBetween(a, s) + milesBetween(s, b) - straight }))
+      .map(s => ({ s, cost: milesBetween(a, s) + milesBetween(s, b) - straight + handicap(s) }))
       .sort((x, y) => x.cost - y.cost).slice(0, per * types.length).map(c => c.s);
     types.forEach((type, k) => {
       const task = ACTIVITIES[type];
@@ -1933,17 +1957,93 @@ function setUpTripOptions() {
 }
 
 // ---------- Test centres ----------
-// DVSA car test centres checked by hand, from DVSA's test centre finder, placed by their postcodes. The batch
-// notebook's index adds every other one in England, Scotland and Wales.
+// DVSA car test centres checked by hand, from DVSA's test centre finder. The batch notebook's index adds every
+// other one in England, Scotland and Wales.
 const TEST_CENTRES = [
-  { name: "Morden (London)", short: "Morden", address: "10 Tudor Drive, Morden SM4 4PE", lat: 51.386583, lon: -0.212444 },
+  { name: "Morden (London)", short: "Morden", address: "10 Tudor Drive, Morden SM4 4PE", lat: 51.386215, lon: -0.211808 },
   { name: "Mitcham (London)", short: "Mitcham", address: "Redhouse Road, Croydon CR0 3AQ", lat: 51.390049, lon: -0.137064 },
   { name: "Tolworth (London)", short: "Tolworth", address: "Douglas House, 1B Douglas Road, Tolworth KT6 7RZ",
-    lat: 51.382972, lon: -0.293566 },
+    lat: 51.384093, lon: -0.292929 },
   { name: "Peebles", short: "Peebles", address: "Rosetta Road, Peebles EH45 8DN", lat: 55.657469, lon: -3.194137 },
   { name: "Galashiels", short: "Galashiels", address: "1 Croft Street, Galashiels TD1 3BH", lat: 55.61259, lon: -2.802674 },
-  { name: "Edinburgh (Currie)", short: "Currie", address: "13-15 Bryce Road, Currie EH14 5LT", lat: 55.899917, lon: -3.308236 },
+  { name: "Edinburgh (Currie)", short: "Currie", address: "13-15 Bryce Road, Currie EH14 5LT", lat: 55.899901, lon: -3.307813 },
 ];
+
+// Where to drive to for each test centre. DVSA's finder only gives the middle of the postcode, which can be a few
+// doors away: Morden's was a house up the road. So these are where OpenStreetMap shows the centre, or the building
+// named in its address (checked against the finder's postcode and the road or car park each one meets), or, where
+// it shows neither and the postcode's middle is by another road or a driveway, the nearest point on the street in
+// the centre's address. Any other centre stays where the finder puts it.
+const CENTRE_AT = {
+  "Aberdeen South (Cove)": [57.088408, -2.108138], "Aberfeldy": [56.618345, -3.867496],
+  "Abergavenny": [51.815962, -3.010603], "Airdrie": [55.866747, -3.988342], "Alness": [57.690681, -4.267968],
+  "Alnwick": [55.411675, -1.705305], "Atherton (Manchester)": [53.529464, -2.50734], "Ayr": [55.482765, -4.604398],
+  "Ballater": [57.045996, -3.040021], "Banbury": [52.057751, -1.348879], "Barnet (London)": [51.645138, -0.185914],
+  "Barnsley": [53.554707, -1.503296], "Barrow In Furness": [54.118575, -3.241796],
+  "Basingstoke": [51.245259, -1.11246], "Belvedere (London)": [51.483578, 0.142384],
+  "Birmingham (Cocks Moors)": [52.417272, -1.888246], "Birmingham (Garretts Green)": [52.472623, -1.771297],
+  "Birmingham (Kings Heath)": [52.406716, -1.887301], "Birmingham (Kingstanding)": [52.544066, -1.890748],
+  "Birmingham (Shirley)": [52.405187, -1.822573], "Birmingham (South Yardley)": [52.455108, -1.810369],
+  "Bishops Stortford": [51.860869, 0.164538], "Bletchley": [51.993873, -0.742527], "Blyth": [55.127401, -1.504117],
+  "Bolton (Manchester)": [53.564964, -2.427715], "Borehamwood (London)": [51.64724, -0.252139],
+  "Brecon": [51.946473, -3.384174], "Bredbury (Manchester)": [53.430455, -2.124843],
+  "Brentwood (London)": [51.610404, 0.29871], "Bristol (Kingswood)": [51.472119, -2.48914],
+  "Buckie": [57.67589, -2.961371], "Burgess Hill": [50.952595, -0.153163], "Canterbury": [51.274786, 1.08844],
+  "Cardiff (Llanishen)": [51.522831, -3.192322], "Cardigan": [52.085491, -4.658385],
+  "Carlisle": [54.898091, -2.955583], "Chadderton": [53.530377, -2.168512], "Cheltenham": [51.903461, -2.064963],
+  "Chesterfield": [53.244347, -1.427478], "Chingford (London)": [51.633501, 0.009036],
+  "Chorley": [53.657527, -2.61856], "Clacton-on-Sea": [51.79424, 1.152313], "Coventry": [52.463628, -1.475817],
+  "Crawley": [51.080936, -0.201754], "Crewe": [53.089908, -2.443701], "Darlington": [54.516364, -1.50941],
+  "Derby (Alvaston)": [52.901878, -1.431034], "Dorchester": [50.713149, -2.47139], "Dundee": [56.478778, -3.007499],
+  "Dunfermline (Vine)": [56.075704, -3.426134], "Durham": [54.746513, -1.609982], "Eastbourne": [50.782493, 0.309698],
+  "Edinburgh (Currie)": [55.899901, -3.307813], "Edinburgh (Musselburgh)": [55.942799, -3.067191],
+  "Elgin": [57.651269, -3.317992], "Enfield (Innova Business Park)": [51.678258, -0.018857],
+  "Exeter": [50.698278, -3.515833], "Farnborough": [51.274058, -0.770734], "Featherstone": [52.640654, -2.11398],
+  "Gairloch": [57.73691, -5.702283], "Gillingham": [51.364906, 0.581923],
+  "Glasgow (Anniesland)": [55.889242, -4.338446], "Glasgow (Baillieston)": [55.860757, -4.112463],
+  "Glasgow (Shieldhall)": [55.864154, -4.349103], "Gloucester": [51.833317, -2.277015],
+  "Gosforth": [55.041316, -1.608965], "Greenford (Horsenden Lane)": [51.550163, -0.330834],
+  "Greenham": [51.375751, -1.289821], "Grimsby Coldwater": [53.580621, -0.113583],
+  "Haddington": [55.960848, -2.78207], "Halifax": [53.729763, -1.891369], "Hamilton": [55.770091, -4.042014],
+  "Hawick": [55.436309, -2.76706], "Hendon (London)": [51.596027, -0.240172], "Herne Bay": [51.362955, 1.148534],
+  "Hexham": [54.974368, -2.105855], "Hornchurch (London)": [51.559265, 0.220908], "Horsforth": [53.839929, -1.62186],
+  "Huddersfield": [53.668113, -1.768655], "Inverness (Longman Drive)": [57.492437, -4.220285],
+  "Ipswich": [52.030768, 1.218957], "Isle of Tiree": [56.501543, -6.806303], "Kelso": [55.589014, -2.426501],
+  "Kendal (Oxenholme Road)": [54.311064, -2.7354], "Kettering": [52.377929, -0.725217],
+  "Kings Lynn": [52.7471, 0.420673], "Kirkcaldy": [56.138364, -3.125267], "Knaresborough": [54.000729, -1.443482],
+  "Launceston": [50.614454, -4.336203], "Lee On The Solent": [50.810997, -1.202966],
+  "Lerwick": [60.151024, -1.147652], "Letchworth": [51.978713, -0.215226], "Lichfield": [52.681996, -1.833364],
+  "Lincoln": [53.202766, -0.613349], "Livingston": [55.907333, -3.498458], "Llanelli": [51.686081, -4.155092],
+  "Llantrisant": [51.524127, -3.365019], "Lochgilphead": [56.036067, -5.428506],
+  "Loughborough": [52.780882, -1.201025], "Louth": [53.363674, 0.012119], "Luton": [51.877728, -0.420127],
+  "Mallaig": [57.005541, -5.831099], "Melton Mowbray": [52.769585, -0.893127],
+  "Morden (London)": [51.386215, -0.211808], "Nelson": [53.834538, -2.210796],
+  "Newport (Gwent)": [51.570239, -2.970197], "Norris Green (Liverpool)": [53.444107, -2.930426],
+  "Northallerton": [54.340422, -1.43237], "Northwich": [53.259534, -2.525748],
+  "Norwich (Peachman Way)": [52.634856, 1.370883], "Nottingham (Colwick)": [52.955615, -1.068938],
+  "Orkney": [58.994924, -2.979733], "Oxford (Cowley)": [51.740936, -1.202394], "Peebles": [55.656505, -3.197201],
+  "Perth (Arran Road)": [56.417263, -3.46022], "Pinner (London)": [51.596801, -0.399875],
+  "Pitlochry": [56.705179, -3.732872], "Plymouth": [50.417431, -4.185592], "Poole": [50.741098, -1.975608],
+  "Preston": [53.760387, -2.751812], "Pwllheli": [52.880872, -4.423335], "Redditch": [52.308369, -1.946453],
+  "Sale (Manchester)": [53.419339, -2.320017], "Salisbury": [51.072219, -1.787242],
+  "Sheffield (Middlewood Road)": [53.41863, -1.512938], "Shrewsbury": [52.746583, -2.736393],
+  "Skipton": [53.955808, -2.024421], "Southall (London)": [51.525846, -0.365358],
+  "Southampton (Maybush)": [50.933682, -1.452858], "Southend-on-Sea": [51.548237, 0.710115],
+  "Southport (Liverpool)": [53.643847, -3.00384], "St Albans": [51.752461, -0.33509],
+  "St Helens (Liverpool)": [53.456758, -2.724339], "Stoke-on-Trent (Newcastle-Under-Lyme)": [52.995923, -2.212156],
+  "Sunderland": [54.92167, -1.429566], "Swindon": [51.574515, -1.832781], "Taunton": [51.027238, -3.079778],
+  "Tilbury": [51.464312, 0.351107], "Tolworth (London)": [51.384093, -0.292929], "Tottenham": [51.607074, -0.078253],
+  "Tunbridge Wells": [51.136393, 0.263993], "Upton": [53.379382, -3.098572], "Wakefield": [53.684001, -1.547519],
+  "Wallasey": [53.418911, -3.027127], "Walton LGV": [53.921367, -1.322608],
+  "Wanstead (London)": [51.580414, 0.023803], "Warrington": [53.410241, -2.57849], "Watford": [51.66645, -0.365203],
+  "Wellingborough": [52.30304, -0.724049], "West Didsbury (Manchester)": [53.424721, -2.257888],
+  "West Wickham (London)": [51.375041, -0.010935], "Whitby": [54.481992, -0.60772], "Wick": [58.451311, -3.090087],
+  "Widnes": [53.363927, -2.770539], "Winchester": [51.056282, -1.322758], "Wood Green (London)": [51.598593, -0.1044],
+  "Worcester": [52.213654, -2.178565], "Wrexham": [53.048969, -3.016146], "Yeading (London)": [51.523352, -0.39029],
+  "York": [53.988834, -1.048898]
+};
+
+const placed = c => (CENTRE_AT[c.name] ? { ...c, lat: CENTRE_AT[c.name][0], lon: CENTRE_AT[c.name][1] } : c);
 
 // These, then the index's (those placed from their address, not just their town)
 function allCentres() {
@@ -1951,7 +2051,7 @@ function allCentres() {
   const more = (state.index ? state.index.centres : [])
     .filter(c => c.found !== "town" && !have.has(c.name) && Number.isFinite(c.lat) && Number.isFinite(c.lon))
     .map(c => ({ name: c.name, short: c.short || c.name, address: c.address || "", lat: c.lat, lon: c.lon }));
-  return [...TEST_CENTRES, ...more];
+  return [...TEST_CENTRES, ...more].map(placed);
 }
 
 // Where a mock test starts and ends: the test centre chosen, or where you are (or searched for)
@@ -2742,7 +2842,7 @@ function pickAgain(here, stops, end, used = []) {
   const per = free.length > 3 ? 3 : DRIVE.choices;  // fewer to weigh when there are many stops
   const options = free.map(stop => {
     const near = state.spots.filter(x => x.kind === stop.part.kind && !taken.has(x.id) && offLine(here, end, x) <= width)
-      .map(x => ({ x, cost: milesBetween(here, x) + milesBetween(x, end) - straight }))
+      .map(x => ({ x, cost: milesBetween(here, x) + milesBetween(x, end) - straight + handicap(x) }))
       .sort((a, b) => a.cost - b.cost).slice(0, per).map(c => c.x);
     if (!near.some(x => x.id === stop.part.spot.id)) near.push(stop.part.spot);  // the one it had stays a choice
     return near;
