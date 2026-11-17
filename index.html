@@ -74,6 +74,21 @@
   .field { width: 100%; min-width: 0; padding: 0 14px; }
   select { width: 100%; padding: 0 10px; }
   .status { margin: 12px 0 0; min-height: 1.45em; }
+
+  /* Suggestions as you type, under the box */
+  .has-suggest { position: relative; }
+  .suggest {
+    position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 1200;
+    margin: 0; padding: 4px 0; list-style: none; max-height: min(60vh, 432px); overflow-y: auto;
+    background: var(--white); border: 2px solid var(--black); border-radius: 10px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+  }
+  .suggest li { display: grid; align-content: center; min-height: 52px; padding: 7px 14px; cursor: pointer; }
+  .suggest li + li { border-top: 1px solid var(--pavement); }
+  .suggest li[aria-selected="true"] { background: var(--pavement); box-shadow: inset 4px 0 0 var(--black); }
+  @media (hover: hover) { .suggest li:hover { background: var(--pavement); } }
+  .s-name { font-weight: 700; line-height: 1.25; }
+  .s-detail { font-size: 15px; line-height: 1.3; color: var(--kerb); }
   .status.problem { color: var(--red); font-weight: 700; }
   .status-detail { display: block; margin-top: 4px; color: var(--kerb); font-weight: 400; font-size: 15px; }
   .log { margin: 16px 0 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.4 var(--font);
@@ -335,9 +350,9 @@
     <div class="find">
       <button id="locate" class="btn btn-go" type="button">Use my location</button>
       <form id="search" class="search" role="search">
-        <label for="place" class="visually-hidden">Postcode or town</label>
-        <input id="place" name="place" type="search" placeholder="Postcode or town"
-               autocomplete="postal-code" enterkeyhint="search" spellcheck="false">
+        <label for="place" class="visually-hidden">Postcode, town or street</label>
+        <input id="place" name="place" type="search" placeholder="Postcode, town or street"
+               autocomplete="off" enterkeyhint="search" spellcheck="false">
         <button class="btn" type="submit">Search</button>
       </form>
     </div>
@@ -390,7 +405,7 @@
   <form id="trip-options" class="options" aria-label="A to B options" hidden>
     <label class="option">
       <span class="option-name">Where to</span>
-      <input id="dest" class="field" type="search" placeholder="Postcode or town" autocomplete="postal-code"
+      <input id="dest" class="field" type="search" placeholder="Postcode, town or street" autocomplete="off"
              enterkeyhint="go" spellcheck="false">
     </label>
     <div class="option stack">
@@ -829,6 +844,7 @@ function alongWay(a, b, step = 4) {
 
 // ---------- Choosing a start point ----------
 function locate() {
+  if (placeSuggest) placeSuggest.stop();
   if (!("geolocation" in navigator) || !window.isSecureContext) {
     setStatus("This browser can't share your location here. Search for a postcode or town instead.", true);
     return;
@@ -859,8 +875,8 @@ const FULL_POSTCODE = /^[A-Z]{1,2}\d[A-Z\d]?\d[A-Z]{2}$/;
 const OUTCODE = /^[A-Z]{1,2}\d[A-Z\d]?$/;
 const PLACE_RANK = ["City", "Town", "Suburban Area", "Village", "Hamlet", "Other Settlement"];
 
-async function getJSON(url) {
-  const res = await fetch(url);
+async function getJSON(url, signal = undefined) {
+  const res = await fetch(url, { signal });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`${url}: ${res.status}`);
   return res.json();
@@ -919,9 +935,171 @@ async function startFrom(text) {
 
 async function search(event) {
   event.preventDefault();
+  if (placeSuggest) placeSuggest.stop();
   const text = $("place").value.trim();
   if (!text) { $("place").focus(); return; }
   await startFrom(text);
+}
+
+// ---------- Suggestions as you type ----------
+// Like a map app: from the first letter, a list to choose from. Test centres whose names start that way (the
+// page's own list, straight away), then postcodes (postcodes.io) and places, streets and landmarks from Photon,
+// OpenStreetMap's search-as-you-type finder. komoot's free Photon server is for fair use, so it's asked once per
+// pause in typing, never twice for the same text, and only about Great Britain, nearest the start first.
+// Choosing one goes straight there: nothing is looked up again.
+const SUGGEST = { pause: 200, most: 8, centres: 2, postcodes: 4,
+                  photon: "https://photon.komoot.io/api/", box: "-8.7,49.8,1.9,60.9" };
+const NOT_A_PLACE = new Set(["county", "state", "region", "country", "continent", "stop", "platform", "halt",
+                             "bus_stop", "stop_position", "station_entrance", "subway_entrance"]);
+const KIND_WORDS = { residential: "Street", living_street: "Street", pedestrian: "Street", unclassified: "Road",
+                     tertiary: "Road", secondary: "Road", service: "Road", primary: "Main road", trunk: "Main road",
+                     neighbourhood: "Area", quarter: "Area", locality: "Place", isolated_dwelling: "Hamlet" };
+let placeSuggest = null, destSuggest = null;
+
+function centreSuggestions(text, near) {
+  const want = text.trim().toLowerCase();
+  if (!want) return [];
+  return allCentres()
+    .filter(c => c.short.toLowerCase().startsWith(want) || (want.length >= 3 &&
+      `${c.short} ${c.name}`.toLowerCase().split(/[^a-z0-9']+/).some(w => w.startsWith(want))))
+    .map(c => ({ c, miles: near ? milesBetween(near, c) : 0 }))
+    .sort((a, b) => a.miles - b.miles || a.c.short.localeCompare(b.c.short))
+    .slice(0, SUGGEST.centres)
+    .map(({ c }) => ({ label: `${c.short} test centre`, detail: c.address ? `Test centre, ${c.address}` : "Test centre",
+                       lat: c.lat, lon: c.lon }));
+}
+
+async function postcodeSuggestions(text, signal) {
+  const compact = text.replace(/\s+/g, "").toUpperCase();
+  if (!/^[A-Z]{1,2}\d/.test(compact)) return [];
+  const asks = [getJSON(`https://api.postcodes.io/postcodes?q=${encodeURIComponent(text.trim())}&limit=${SUGGEST.postcodes}`, signal)];
+  if (OUTCODE.test(compact)) asks.push(getJSON(`https://api.postcodes.io/outcodes/${encodeURIComponent(compact)}`, signal));
+  const [codes, area] = await Promise.all(asks);
+  const out = [];
+  if (area && area.result && area.result.latitude != null) {
+    const towns = area.result.admin_district || [];
+    out.push({ label: area.result.outcode, detail: ["Postcode area", ...towns.slice(0, 2)].join(", "),
+               lat: area.result.latitude, lon: area.result.longitude });
+  }
+  for (const r of (codes && codes.result) || []) {
+    if (r.latitude == null) continue;
+    out.push({ label: r.postcode, detail: ["Postcode", r.admin_ward, r.admin_district].filter(Boolean).join(", "),
+               lat: r.latitude, lon: r.longitude });
+  }
+  return out;
+}
+
+function photonPlace(f) {
+  const p = f.properties || {}, [lon, lat] = (f.geometry && f.geometry.coordinates) || [];
+  const name = p.name || (p.street ? [p.housenumber, p.street].filter(Boolean).join(" ") : "");
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !name || p.countrycode !== "GB") return null;
+  if (p.osm_key === "boundary" || p.osm_key === "public_transport" || NOT_A_PLACE.has(p.osm_value) || NOT_A_PLACE.has(p.type)) {
+    return null;
+  }
+  const town = [p.district, p.city, p.locality, p.county].find(x => x && x !== name) || "";
+  const street = p.name && p.street && p.street !== name ? [p.housenumber, p.street].filter(Boolean).join(" ") : "";
+  const value = p.osm_value === "yes" ? p.osm_key : p.osm_value;  // building=yes is just a building
+  const kind = !p.name ? "Address" : sentence(KIND_WORDS[value] || (p.osm_key === "highway" ? "Road" : (value || "").replace(/_/g, " ")));
+  return { label: town ? `${name}, ${town}` : name, detail: [kind, street].filter(Boolean).join(", "), lat, lon };
+}
+
+async function photonSuggestions(text, near, signal) {
+  const bias = near ? `&lat=${near.lat.toFixed(4)}&lon=${near.lon.toFixed(4)}` : "";
+  const r = await getJSON(`${SUGGEST.photon}?q=${encodeURIComponent(text.trim())}&limit=10&lang=en&bbox=${SUGGEST.box}${bias}`, signal);
+  return ((r && r.features) || []).map(photonPlace).filter(Boolean);
+}
+
+// Up to SUGGEST.most: test centres, postcodes, then the rest, each place once
+async function suggestionsFor(text, near, signal) {
+  const [codes, places] = await Promise.all([postcodeSuggestions(text, signal).catch(() => []),
+                                             photonSuggestions(text, near, signal).catch(() => [])]);
+  const out = [];
+  for (const s of [...centreSuggestions(text, near), ...codes, ...places]) {
+    if (out.some(t => t.label === s.label && milesBetween(t, s) < 0.25)) continue;
+    out.push(s);
+    if (out.length === SUGGEST.most) break;
+  }
+  return out;
+}
+
+// A list under a search box as you type. near() gives where to suggest things near (or null); choose(s) is
+// called with the one chosen (tapped, or picked with the arrow keys and Enter). Enter on its own still searches.
+function suggestUnder(input, near, choose) {
+  const holder = input.closest(".search") || input.parentElement;
+  const list = el("ul", { id: `${input.id}-suggestions`, className: "suggest", role: "listbox", "aria-label": "Suggestions" });
+  list.hidden = true;
+  holder.classList.add("has-suggest");
+  holder.append(list);
+  for (const [k, v] of Object.entries({ role: "combobox", "aria-autocomplete": "list", "aria-expanded": "false",
+                                        "aria-controls": list.id })) input.setAttribute(k, v);
+  const cache = new Map();
+  let shown = [], active = -1, timer = 0, asked = 0, ctl = null;
+  const close = () => {
+    list.hidden = true;
+    list.replaceChildren();
+    active = -1;
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+  };
+  const stop = () => { asked++; clearTimeout(timer); if (ctl) ctl.abort(); close(); };
+  const mark = i => {
+    active = i;
+    [...list.children].forEach((li, k) => li.setAttribute("aria-selected", String(k === i)));
+    input.setAttribute("aria-activedescendant", `${list.id}-${i}`);
+    list.children[i].scrollIntoView({ block: "nearest" });
+  };
+  const show = found => {
+    shown = found;
+    if (!found.length || document.activeElement !== input) { close(); return; }
+    list.replaceChildren(...found.map((s, i) => el("li", { id: `${list.id}-${i}`, role: "option", "aria-selected": "false",
+                                                          "data-i": i },
+      el("span", { className: "s-name" }, s.label), el("span", { className: "s-detail" }, s.detail))));
+    active = -1;
+    input.removeAttribute("aria-activedescendant");
+    list.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+  };
+  const pick = s => { stop(); input.value = s.label; choose(s); };
+  const ask = async text => {
+    const o = near(), key = `${text.toLowerCase()}|${o ? `${o.lat.toFixed(2)},${o.lon.toFixed(2)}` : ""}`;
+    if (cache.has(key)) { show(cache.get(key)); return; }
+    const mine = ++asked;
+    if (ctl) ctl.abort();
+    ctl = new AbortController();
+    const found = await suggestionsFor(text, o, ctl.signal);
+    if (mine !== asked || input.value.trim() !== text) return;  // typed on since, or chosen
+    cache.set(key, found);
+    show(found);
+  };
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    const text = input.value.trim();
+    if (!text) { stop(); return; }
+    show(centreSuggestions(text, near()));  // straight away, while the rest are asked for
+    timer = setTimeout(() => ask(text), SUGGEST.pause);
+  });
+  input.addEventListener("keydown", e => {
+    if (list.hidden) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const n = shown.length, step = e.key === "ArrowDown" ? 1 : -1;
+      mark(active < 0 ? (step > 0 ? 0 : n - 1) : (active + step + n) % n);
+    } else if (e.key === "Enter" && active >= 0) {
+      e.preventDefault();
+      pick(shown[active]);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+    }
+  });
+  input.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== input) close(); }, 150));
+  list.addEventListener("mousedown", e => e.preventDefault());  // the box keeps the keyboard while one is tapped
+  list.addEventListener("click", e => {
+    e.preventDefault();  // inside a label, a click would otherwise go on to the box
+    const li = e.target.closest("li[data-i]");
+    if (li) pick(shown[Number(li.dataset.i)]);
+  });
+  return { stop };
 }
 
 function setOrigin(origin, text = "") {
@@ -1035,7 +1213,7 @@ function setMode(mode) {
   $("kinds").hidden = mode !== "spots";
   $("test-options").hidden = mode !== "test";
   $("trip-options").hidden = mode !== "trip";
-  const from = mode === "trip" ? "From: postcode or town" : "Postcode or town";
+  const from = mode === "trip" ? "From: postcode, town or street" : "Postcode, town or street";
   $("place").placeholder = from;
   document.querySelector("label[for='place']").textContent = from;
   render();
@@ -1426,6 +1604,7 @@ async function buildTest(event) {
   button.disabled = true;
   try {
     // A postcode or town typed in the box but not searched for: start from there
+    if (placeSuggest) placeSuggest.stop();
     const typed = $("place").value.trim();
     if (typed && typed !== state.originText && !(await startFrom(typed))) return;
     const start = testStart();
@@ -1789,6 +1968,8 @@ async function buildTrip(event) {
   const button = $("plan"), t = state.trip;
   button.disabled = true;
   try {
+    if (placeSuggest) placeSuggest.stop();
+    if (destSuggest) destSuggest.stop();
     const typed = $("place").value.trim();  // a start typed but not searched for
     if (typed && typed !== state.originText && !(await startFrom(typed))) return;
     if (!state.origin) {
@@ -3309,6 +3490,14 @@ async function start() {
   for (const b of document.querySelectorAll(".mode")) b.addEventListener("click", () => setMode(b.dataset.mode));
   $("locate").addEventListener("click", locate);
   $("search").addEventListener("submit", search);
+  placeSuggest = suggestUnder($("place"), () => state.origin, s => {
+    $("place").blur();
+    setOrigin({ lat: s.lat, lon: s.lon, label: s.label }, s.label);
+  });
+  destSuggest = suggestUnder($("dest"), () => state.origin, s => {
+    Object.assign(state.trip, { dest: { lat: s.lat, lon: s.lon, label: s.label }, destText: s.label, result: null });
+    $("dest").blur();
+  });
   const missing = await loadSpots();
   const indexed = await loadIndex();
   if (!state.spots.length && !covered().length) {
