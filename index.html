@@ -75,20 +75,51 @@
   select { width: 100%; padding: 0 10px; }
   .status { margin: 12px 0 0; min-height: 1.45em; }
 
-  /* Suggestions as you type, under the box */
+  /* Suggestions as you type, under the box: what it is (and how far), its name with what's typed in bold, where */
   .has-suggest { position: relative; }
   .suggest {
     position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 1200;
-    margin: 0; padding: 4px 0; list-style: none; max-height: min(60vh, 432px); overflow-y: auto;
-    background: var(--white); border: 2px solid var(--black); border-radius: 10px;
+    margin: 0; padding: 4px 0; list-style: none; max-height: min(60vh, 440px); overflow-y: auto;
+    overscroll-behavior: contain; background: var(--white); border: 2px solid var(--black); border-radius: 10px;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
   }
-  .suggest li { display: grid; align-content: center; min-height: 52px; padding: 7px 14px; cursor: pointer; }
+  .suggest.loading::before {  /* more on the way: a line along the top */
+    content: ""; display: block; height: 3px; margin: -4px 0 1px; border-radius: 8px 8px 0 0;
+    background: linear-gradient(var(--blue), var(--blue)) no-repeat var(--pavement);
+    background-size: 30% 100%; animation: s-load 1s ease-in-out infinite;
+  }
+  @keyframes s-load { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+  @media (prefers-reduced-motion: reduce) { .suggest.loading::before { animation: none; background-size: 100% 100%; } }
+  .suggest li {
+    display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; column-gap: 10px;
+    min-height: 58px; padding: 8px 14px 8px 6px; cursor: pointer;
+  }
   .suggest li + li { border-top: 1px solid var(--pavement); }
   .suggest li[aria-selected="true"] { background: var(--pavement); box-shadow: inset 4px 0 0 var(--black); }
   @media (hover: hover) { .suggest li:hover { background: var(--pavement); } }
-  .s-name { font-weight: 700; line-height: 1.25; }
-  .s-detail { font-size: 15px; line-height: 1.3; color: var(--kerb); }
+  .suggest .s-wait { display: block; min-height: 0; padding: 14px; color: var(--kerb); cursor: default; }
+  .s-lead { display: grid; justify-items: center; row-gap: 3px; }
+  .s-icon {
+    display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
+    background: var(--pavement); color: var(--kerb);
+  }
+  .s-icon svg { width: 20px; height: 20px; }
+  .suggest li[aria-selected="true"] .s-icon:not(.s-plate):not(.s-park) { background: var(--white); }
+  @media (hover: hover) { .suggest li:hover .s-icon:not(.s-plate):not(.s-park) { background: var(--white); } }
+  .s-you { color: var(--blue); }
+  .s-plate, .s-park { width: 28px; height: 28px; margin: 2px; border-radius: 4px; font: 700 21px/1 var(--font); }
+  .s-plate { background: var(--white); color: var(--red); box-shadow: inset 0 0 0 1.5px #B9BEC3; }  /* an L plate */
+  .s-park { background: var(--blue); color: var(--white); }                                           /* a car park sign */
+  .s-miles { font-size: 13px; line-height: 1; color: var(--kerb); white-space: nowrap; }
+  .s-text { display: grid; min-width: 0; }
+  .s-name { line-height: 1.25; overflow-wrap: anywhere; }
+  .s-name b { font-weight: 700; }
+  .s-detail {
+    font-size: 15px; line-height: 1.3; color: var(--kerb); overflow: hidden;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  }
+  .forget { margin-top: 8px; }
+  .forget[disabled] { cursor: default; }
   .status.problem { color: var(--red); font-weight: 700; }
   .status-detail { display: block; margin-top: 4px; color: var(--kerb); font-weight: 400; font-size: 15px; }
   .log { margin: 16px 0 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.4 var(--font);
@@ -329,6 +360,11 @@
     </div>
     <section id="settings" class="settings" aria-labelledby="settings-title" hidden>
       <h2 id="settings-title" class="settings-title" tabindex="-1">Settings</h2>
+      <fieldset class="setting">
+        <legend>Recent searches</legend>
+        <p id="recent-hint" class="hint">None yet. The places you choose are shown first when you tap a search box.</p>
+        <button id="forget-recent" class="btn forget" type="button" disabled>Forget them</button>
+      </fieldset>
       <fieldset class="setting">
         <legend>Troubleshooting</legend>
         <label class="tick"><input id="keep-log" type="checkbox"> Keep a log</label>
@@ -856,6 +892,7 @@ function locate() {
     pos => {
       button.disabled = false;
       $("place").value = "";  // so an old postcode in the box doesn't look like the start
+      deviceAt = { lat: pos.coords.latitude, lon: pos.coords.longitude, at: Date.now() };
       setOrigin({ lat: pos.coords.latitude, lon: pos.coords.longitude, label: "you" });
     },
     err => {
@@ -915,17 +952,26 @@ async function lookUp(text, near = null) {
   return { lat: best.latitude, lon: best.longitude, label };
 }
 
-// Look up a postcode or town and make it the start point. Says false if that didn't work.
+// Remembered for next time when found by searching rather than chosen from the list
+function rememberFound(text, place, chosen) {
+  const compact = text.replace(/\s+/g, "").toUpperCase();
+  remember(chosen || { name: place.label, label: place.label, lat: place.lat, lon: place.lon, kind: "place",
+                       detail: FULL_POSTCODE.test(compact) ? "Postcode" : OUTCODE.test(compact) ? "Postcode area" : "" });
+}
+
+// Look up a postcode, town or street and make it the start point. Says false if that didn't work.
 async function startFrom(text) {
   setStatus(`Looking up ${text}...`);
   try {
-    const place = await lookUp(text);
+    const { place, chosen } = await findPlace(text, null, placeSuggest);
     if (!place) {
-      setStatus(`Couldn't find "${text}". Try a full postcode, or the name of a town.`, true);
+      setStatus(`Couldn't find "${text}". Try a postcode, or the name of a town or street.`, true);
       return false;
     }
+    rememberFound(text, place, chosen);
+    if (chosen) $("place").value = chosen.label;
     $("place").blur();
-    setOrigin(place, text);
+    setOrigin(place, chosen ? chosen.label : text);
     return true;
   } catch (err) {
     setStatus("The postcode search isn't answering. Check your connection, or use your location.", true);
@@ -935,96 +981,321 @@ async function startFrom(text) {
 
 async function search(event) {
   event.preventDefault();
-  if (placeSuggest) placeSuggest.stop();
   const text = $("place").value.trim();
   if (!text) { $("place").focus(); return; }
+  const top = placeSuggest && placeSuggest.best(text);  // plainly what was typed: as if it were tapped
+  if (top) { placeSuggest.pick(top); return; }
+  if (placeSuggest) placeSuggest.stop();
   await startFrom(text);
 }
 
 // ---------- Suggestions as you type ----------
-// Like a map app: from the first letter, a list to choose from. Test centres whose names start that way (the
-// page's own list, straight away), then postcodes (postcodes.io) and places, streets and landmarks from Photon,
-// OpenStreetMap's search-as-you-type finder. komoot's free Photon server is for fair use, so it's asked once per
-// pause in typing, never twice for the same text, and only about Great Britain, nearest the start first.
-// Choosing one goes straight there: nothing is looked up again.
-const SUGGEST = { pause: 200, most: 8, centres: 2, postcodes: 4,
-                  photon: "https://photon.komoot.io/api/", box: "-8.7,49.8,1.9,60.9" };
-const NOT_A_PLACE = new Set(["county", "state", "region", "country", "continent", "stop", "platform", "halt",
-                             "bus_stop", "stop_position", "station_entrance", "subway_entrance"]);
-const KIND_WORDS = { residential: "Street", living_street: "Street", pedestrian: "Street", unclassified: "Road",
-                     tertiary: "Road", secondary: "Road", service: "Road", primary: "Main road", trunk: "Main road",
-                     neighbourhood: "Area", quarter: "Area", locality: "Place", isolated_dwelling: "Hamlet" };
+// Like a map app: from the first letter, a list to choose from, the likeliest first, each with what it is, where
+// it is and how far away. Places chosen before and test centres come straight away, from the phone and the page.
+// Postcodes come from postcodes.io, and towns, streets, stations and shops from Photon, OpenStreetMap's
+// search-as-you-type finder, asked twice: within about 3 miles of where you're searching from (left to itself it
+// puts a famous High Street ten miles away above the one round the corner, and shops anywhere), and across Great
+// Britain. Photon takes about a second to answer, so its last answer is narrowed down as you go on typing, and the
+// next question is already on its way. komoot's free server is for fair use: no more than two questions at once,
+// at most two a second, never twice the same, none for a whole postcode, and none for a few seconds if it stops
+// answering. Choosing one goes straight there, without looking it up again.
+const SUGGEST = { pause: 150, gap: 500, wait: 700, flying: 2, rest: 8000, most: 7, recent: 5, keep: 8, around: 0.05,
+                  photon: "https://photon.komoot.io/api/", gb: "-8.7,49.8,1.9,60.9" };
+const RECENT_KEY = "driving-practice-recent";
+// How likely each kind is to be the one wanted: a head start, and how much being far away counts against it
+const SUGGEST_KINDS = {
+  postcode: { bonus: 3, far: 0.3 },   centre: { bonus: 0.6, far: 0.6 },  city: { bonus: 1.6, far: 0.25 },
+  town: { bonus: 1.2, far: 0.35 },    area: { bonus: 0.8, far: 0.6 },    locality: { bonus: 0.3, far: 0.7 },
+  airport: { bonus: 0.8, far: 0.35 }, station: { bonus: 0.3, far: 0.6 }, street: { bonus: 0, far: 1 },
+  parking: { bonus: 0, far: 1 },      address: { bonus: 0, far: 1 },     place: { bonus: -0.3, far: 1 },
+  building: { bonus: -0.6, far: 1 },  // a block of flats, a house with a name
+};
+const RECENT_KIND = { bonus: 2.5, far: 0.2 };
+const MATCH_COST = [5, 3, 1.2, 0.7, 0];  // by matchLevel: from not matching at all to starting with what's typed
+const PLACE_WORDS = { city: "City", town: "Town", village: "Village", hamlet: "Hamlet", suburb: "Area", borough: "Area",
+                      quarter: "Area", neighbourhood: "Area", locality: "Place", isolated_dwelling: "Hamlet",
+                      square: "Square", farm: "Farm" };
+const ROAD_WORDS = { motorway: "Motorway", trunk: "Main road", primary: "Main road", secondary: "Road", tertiary: "Road",
+                     unclassified: "Road", residential: "Street", living_street: "Street", pedestrian: "Street",
+                     service: "Road", road: "Road" };
+const THING_WORDS = { retail: "Shops", supermarket: "Supermarket", convenience: "Shop", fuel: "Petrol station",
+                      parking: "Car park", aerodrome: "Airport", terminal: "Airport", industrial: "Industrial estate",
+                      commercial: "Business park", apartments: "Flats", fast_food: "Takeaway", cafe: "Café",
+                      place_of_worship: "Place of worship", sports_centre: "Sports centre", yes: "Building",
+                      house: "Building", attraction: "Attraction", department_store: "Department store",
+                      mall: "Shopping centre", doityourself: "DIY store", wholesale: "Wholesale store",
+                      furniture: "Furniture store", hardware: "Hardware store", charging_station: "Charging point",
+                      car_repair: "Garage", car: "Car dealer", doctors: "Doctor's", dentist: "Dentist",
+                      fitness_centre: "Gym", marketplace: "Market", outpost: "Collection point" };
+const FOOD = new Set(["fast_food", "restaurant", "cafe", "pub", "bar", "food_court", "ice_cream", "biergarten"]);
+const SKIP_KEYS = new Set(["boundary", "public_transport", "waterway", "natural", "power", "man_made", "route", "barrier"]);
+const SKIP_VALUES = new Set(["county", "state", "region", "country", "continent", "postcode", "stop", "platform",
+                             "bus_stop", "stop_position", "station_entrance", "subway_entrance", "tram_stop",
+                             "motorway_junction", "taxi", "shelter", "bench", "waste_basket", "waste_disposal",
+                             "recycling", "post_box", "telephone", "atm", "vending_machine", "bicycle_parking",
+                             "motorcycle_parking", "parking_entrance", "parking_space", "grit_bin", "drinking_water"]);
+const SHORT_FOR = { st: "street", rd: "road", ave: "avenue", av: "avenue", ln: "lane", dr: "drive", cres: "crescent",
+                    gdns: "gardens", pl: "place", sq: "square", ct: "court", cl: "close", tce: "terrace", pde: "parade",
+                    pk: "park", stn: "station", ctr: "centre", hosp: "hospital", uni: "university" };
 let placeSuggest = null, destSuggest = null;
+let deviceAt = null;        // where the phone is, when it's said: only to put nearby places first
+let nearbyRefused = false;  // asked for the phone's location from the list, and told no
+let remoteRest = 0;         // until when the servers are left alone, after one didn't answer
 
-function centreSuggestions(text, near) {
-  const want = text.trim().toLowerCase();
-  if (!want) return [];
-  return allCentres()
-    .filter(c => c.short.toLowerCase().startsWith(want) || (want.length >= 3 &&
-      `${c.short} ${c.name}`.toLowerCase().split(/[^a-z0-9']+/).some(w => w.startsWith(want))))
-    .map(c => ({ c, miles: near ? milesBetween(near, c) : 0 }))
-    .sort((a, b) => a.miles - b.miles || a.c.short.localeCompare(b.c.short))
-    .slice(0, SUGGEST.centres)
-    .map(({ c }) => ({ label: `${c.short} test centre`, detail: c.address ? `Test centre, ${c.address}` : "Test centre",
-                       lat: c.lat, lon: c.lon }));
+// Letters only, the same however it's written: "King's" and "kings", "Café" and "cafe", "M&S" and "m and s"
+const fold = text => String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+  .replace(/['’.]/g, "").replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
+const wordsOf = text => fold(text).split(" ").filter(Boolean);
+// What's typed, word by word, and in full where it's a short form after the first word ("high st", not "St Albans")
+const typedWords = text => wordsOf(text).map((w, i) => ({ w, full: i > 0 ? SHORT_FOR[w] || "" : "" }));
+// What Photon is asked for: as typed ("B&Q", "Sainsbury's"), with those short forms in full, since it reads
+// "high st" as High Saint
+const fullText = text => text.trim().split(/\s+/).map((w, i) => (i > 0 && SHORT_FOR[fold(w)]) || w).join(" ");
+const looksLikePostcode = text => /^[A-Z]{1,2}\d/i.test(text.replace(/\s+/g, ""));
+const wholePostcode = text => /^[A-Z]{1,2}\d[A-Z\d]?(\s+\d|\d[A-Z])/i.test(text.trim());  // past the first half
+const canLocate = () => "geolocation" in navigator && window.isSecureContext;
+
+// 4: the name starts with what's typed; 3: every word typed starts a word of the name; 2: of the name or where
+// it is ("lidl high street"); 1: some do; 0: none (Photon also finds things spelt a little differently)
+function matchLevel(typed, name, more = []) {
+  if (!typed.length) return 0;
+  const hit = (t, w) => w.startsWith(t.w) || Boolean(t.full && w.startsWith(t.full));
+  const last = typed.length - 1;
+  if (typed.every((t, i) => i < name.length && (i === last ? hit(t, name[i]) : name[i] === t.w || name[i] === t.full))) return 4;
+  if (typed.every(t => name.some(w => hit(t, w)))) return 3;
+  if (typed.every(t => name.some(w => hit(t, w)) || more.some(w => hit(t, w)))) return 2;
+  return typed.some(t => name.some(w => hit(t, w))) ? 1 : 0;
+}
+const levelOf = (s, typed) => matchLevel(typed, s.words || [], s.more || []);
+// How many of the words typed, from the first, start words of the name: for Tesco Express, "tesco sutton" has 1
+// (the rest may well say where, which Photon knows and doesn't always say)
+function namedFirst(typed, name) {
+  let n = 0;
+  while (n < typed.length && name.some(w => w.startsWith(typed[n].w) || Boolean(typed[n].full && w.startsWith(typed[n].full)))) n++;
+  return n;
+}
+
+// Places chosen before, newest first, kept on this phone
+function recents() {
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+    return Array.isArray(list) ? list.filter(r => r && r.label && Number.isFinite(r.lat) && Number.isFinite(r.lon)) : [];
+  } catch (err) { return []; }
+}
+function remember(s) {
+  const kept = { name: s.name || s.label, label: s.label, detail: s.detail || "", kind: s.kind || "place",
+                 lat: Number(Number(s.lat).toFixed(5)), lon: Number(Number(s.lon).toFixed(5)) };
+  if (!kept.label || !Number.isFinite(kept.lat) || !Number.isFinite(kept.lon)) return;
+  const others = recents().filter(r => !(fold(r.label) === fold(kept.label) && milesBetween(r, kept) < 0.3));
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify([kept, ...others].slice(0, SUGGEST.keep))); } catch (err) { /* private browsing */ }
+  showForgetRecent();
+}
+function forgetRecent() {
+  try { localStorage.removeItem(RECENT_KEY); } catch (err) { /* nothing kept */ }
+  showForgetRecent();
+}
+function showForgetRecent() {
+  const button = $("forget-recent");
+  if (!button) return;
+  const n = recents().length;
+  button.disabled = !n;
+  $("recent-hint").textContent = n
+    ? `${n} ${n === 1 ? "place" : "places"} you've chosen, shown first when you tap a search box.`
+    : "None yet. The places you choose are shown first when you tap a search box.";
+}
+function recentSuggestions(typed) {
+  return recents().map((r, i) => ({ ...r, recent: true, order: i, words: wordsOf(r.name || r.label),
+                                    more: wordsOf(`${r.label} ${r.detail}`) }))
+    .filter(s => !typed.length || levelOf(s, typed) >= 2);
+}
+
+// Where to put things near: the start, or the phone if it's said lately (both real, so distances are shown),
+// else the place chosen last time or the test centre picked in the mock test options (just a guess)
+function suggestFrom() {
+  if (state.origin) return { lat: state.origin.lat, lon: state.origin.lon, real: true };
+  if (deviceAt && Date.now() - deviceAt.at < 15 * 60000) return { lat: deviceAt.lat, lon: deviceAt.lon, real: true };
+  const last = recents()[0];
+  if (last) return { lat: last.lat, lon: last.lon, real: false };
+  const c = settings.testCentre ? allCentres().find(x => x.name === settings.testCentre) : null;
+  return c ? { lat: c.lat, lon: c.lon, real: false } : null;
+}
+const nearKey = from => (from ? `${from.lat.toFixed(2)},${from.lon.toFixed(2)}` : "");
+
+// "10 Tudor Drive, Morden SM4 4PE" to "Morden SM4 4PE"; a bare postcode keeps the part before it
+function centrePlace(address) {
+  const parts = String(address || "").replace(/\s*\([^)]*\)/g, "").split(",").map(x => x.trim()).filter(Boolean);
+  if (!parts.length) return "";
+  const last = parts[parts.length - 1];
+  return parts.length > 1 && /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i.test(last) ? `${parts[parts.length - 2]} ${last}` : last;
+}
+function centreSuggestions(typed) {
+  if (!typed.length) return [];
+  const least = typed.length === 1 && typed[0].w.length === 1 ? 4 : 2;  // one letter: names starting with it
+  return allCentres().map(c => {
+    const name = `${c.short} test centre`, where = centrePlace(c.address);
+    return { name, label: name, detail: where ? `Test centre, ${where}` : "Test centre", kind: "centre", lat: c.lat,
+             lon: c.lon, words: wordsOf(name), more: wordsOf(`${c.name} driving ${c.address}`) };
+  }).filter(s => levelOf(s, typed) >= least);
 }
 
 async function postcodeSuggestions(text, signal) {
   const compact = text.replace(/\s+/g, "").toUpperCase();
-  if (!/^[A-Z]{1,2}\d/.test(compact)) return [];
-  const asks = [getJSON(`https://api.postcodes.io/postcodes?q=${encodeURIComponent(text.trim())}&limit=${SUGGEST.postcodes}`, signal)];
+  if (!looksLikePostcode(compact)) return [];
+  const asks = [getJSON(`https://api.postcodes.io/postcodes?q=${encodeURIComponent(text.trim())}&limit=4`, signal)];
   if (OUTCODE.test(compact)) asks.push(getJSON(`https://api.postcodes.io/outcodes/${encodeURIComponent(compact)}`, signal));
   const [codes, area] = await Promise.all(asks);
   const out = [];
+  const code = (name, detail, lat, lon) => out.push({ name, label: name, detail, kind: "postcode", lat, lon, order: out.length,
+                                                      words: [fold(name).replace(/ /g, ""), ...wordsOf(name)], more: [] });
   if (area && area.result && area.result.latitude != null) {
-    const towns = area.result.admin_district || [];
-    out.push({ label: area.result.outcode, detail: ["Postcode area", ...towns.slice(0, 2)].join(", "),
-               lat: area.result.latitude, lon: area.result.longitude });
+    code(area.result.outcode, ["Postcode area", ...(area.result.admin_district || []).slice(0, 2)].join(", "),
+         area.result.latitude, area.result.longitude);
   }
   for (const r of (codes && codes.result) || []) {
-    if (r.latitude == null) continue;
-    out.push({ label: r.postcode, detail: ["Postcode", r.admin_ward, r.admin_district].filter(Boolean).join(", "),
-               lat: r.latitude, lon: r.longitude });
+    if (r.latitude != null) code(r.postcode, ["Postcode", r.admin_ward, r.admin_district].filter(Boolean).join(", "), r.latitude, r.longitude);
   }
   return out;
 }
 
-function photonPlace(f) {
+// One of Photon's answers as a suggestion, or null for what nobody drives to (a county, a bus stop, a stream)
+function photonSuggestion(f, order) {
   const p = f.properties || {}, [lon, lat] = (f.geometry && f.geometry.coordinates) || [];
-  const name = p.name || (p.street ? [p.housenumber, p.street].filter(Boolean).join(" ") : "");
-  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !name || p.countrycode !== "GB") return null;
-  if (p.osm_key === "boundary" || p.osm_key === "public_transport" || NOT_A_PLACE.has(p.osm_value) || NOT_A_PLACE.has(p.type)) {
+  const key = p.osm_key, value = p.osm_value;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || p.countrycode !== "GB") return null;
+  if (SKIP_KEYS.has(key) || SKIP_VALUES.has(value) || SKIP_VALUES.has(p.type)) return null;
+  if ((key === "railway" && value !== "station" && value !== "halt") || (key === "historic" && value === "railway_station") ||
+      (key === "highway" && !ROAD_WORDS[value]) || (key === "landuse" && !["industrial", "commercial", "retail"].includes(value))) {
     return null;
   }
-  const town = [p.district, p.city, p.locality, p.county].find(x => x && x !== name) || "";
-  const street = p.name && p.street && p.street !== name ? [p.housenumber, p.street].filter(Boolean).join(" ") : "";
-  const value = p.osm_value === "yes" ? p.osm_key : p.osm_value;  // building=yes is just a building
-  const kind = !p.name ? "Address" : sentence(KIND_WORDS[value] || (p.osm_key === "highway" ? "Road" : (value || "").replace(/_/g, " ")));
-  return { label: town ? `${name}, ${town}` : name, detail: [kind, street].filter(Boolean).join(", "), lat, lon };
-}
-
-async function photonSuggestions(text, near, signal) {
-  const bias = near ? `&lat=${near.lat.toFixed(4)}&lon=${near.lon.toFixed(4)}` : "";
-  const r = await getJSON(`${SUGGEST.photon}?q=${encodeURIComponent(text.trim())}&limit=10&lang=en&bbox=${SUGGEST.box}${bias}`, signal);
-  return ((r && r.features) || []).map(photonPlace).filter(Boolean);
-}
-
-// Up to SUGGEST.most: test centres, postcodes, then the rest, each place once
-async function suggestionsFor(text, near, signal) {
-  const [codes, places] = await Promise.all([postcodeSuggestions(text, signal).catch(() => []),
-                                             photonSuggestions(text, near, signal).catch(() => [])]);
-  const out = [];
-  for (const s of [...centreSuggestions(text, near), ...codes, ...places]) {
-    if (out.some(t => t.label === s.label && milesBetween(t, s) < 0.25)) continue;
-    out.push(s);
-    if (out.length === SUGGEST.most) break;
+  const bare = p.name || (p.street ? [p.housenumber, p.street].filter(Boolean).join(" ") : "");
+  if (!bare) return null;
+  const kind = key === "place" && ["city", "town"].includes(value) ? value
+    : key === "place" && ["suburb", "borough", "quarter", "village"].includes(value) ? "area"
+    : key === "place" && PLACE_WORDS[value] ? "locality"
+    : key === "railway" || (key === "building" && value === "train_station") ? "station"
+    : key === "aeroway" ? "airport"
+    : key === "highway" ? "street"
+    : key === "amenity" && value === "parking" ? "parking"
+    : !p.name ? "address" : key === "building" ? "building" : "place";
+  const icon = kind === "street" || kind === "station" ? kind
+    : value === "fuel" || value === "charging_station" ? "fuel"
+    : FOOD.has(value) ? "food"
+    : key === "shop" || ["marketplace", "retail", "mall"].includes(value) ? "shop" : "pin";
+  const name = kind === "station" && !/station/i.test(bare) ? `${bare} station` : bare;
+  const outcode = p.postcode ? String(p.postcode).trim().toUpperCase().split(/\s+/)[0] : "";
+  const town = [p.district, p.locality, p.city, p.county].find(x => x && fold(x) !== fold(bare)) || "";
+  const street = p.street && fold(p.street) !== fold(bare) ? p.street : "";
+  const area = [town, outcode].filter(Boolean).join(" ");
+  const word = kind === "address" ? "Address" : kind === "street" ? ROAD_WORDS[value]
+    : (key === "place" && PLACE_WORDS[value]) || THING_WORDS[value] ||
+      sentence(`${String(value || "").replace(/_/g, " ")}${key === "shop" ? " shop" : ""}`);
+  let detail, label = town ? `${name}, ${town}` : name;
+  if (key === "place") {  // a town or an area: the bigger place it's in
+    detail = [word, [p.city, p.county].find(x => x && fold(x) !== fold(bare)) || p.state].filter(Boolean).join(", ");
+  } else if (["place", "building", "parking", "airport"].includes(kind)) {  // a shop or a car park: its address, to tell branches apart
+    detail = [word, p.housenumber && street ? `${p.housenumber} ${street}` : street, area].filter(Boolean).join(", ");
+    if (street) label = `${name}, ${street}`;
+  } else {
+    detail = [word, area].filter(Boolean).join(", ");
   }
-  return out;
+  return { name, label, detail, kind, icon, lat, lon, outcode, order, words: wordsOf(name),
+           more: wordsOf([street, p.district, p.locality, p.city, p.county].join(" ")) };
 }
 
-// A list under a search box as you type. near() gives where to suggest things near (or null); choose(s) is
-// called with the one chosen (tapped, or picked with the arrow keys and Enter). Enter on its own still searches.
-function suggestUnder(input, near, choose) {
+function aroundBox(p) {
+  const dy = SUGGEST.around, dx = dy / Math.cos(p.lat * Math.PI / 180);
+  return [p.lon - dx, p.lat - dy, p.lon + dx, p.lat + dy].map(x => x.toFixed(3)).join(",");
+}
+async function photonSuggestions(text, from, signal) {
+  const q = encodeURIComponent(fullText(text));
+  const near = from ? { lat: Number(from.lat.toFixed(2)), lon: Number(from.lon.toFixed(2)) } : null;  // a km is near enough
+  const ask = box => getJSON(`${SUGGEST.photon}?q=${q}&limit=10&lang=en&bbox=${box}` +
+                             (near ? `&lat=${near.lat}&lon=${near.lon}` : ""), signal)
+    .then(r => ((r && r.features) || []).map(photonSuggestion).filter(Boolean));
+  const lists = await Promise.all(near ? [ask(aroundBox(near)), ask(SUGGEST.gb)] : [ask(SUGGEST.gb)]);
+  return lists.flat();
+}
+// From the servers: postcodes, and Photon's places unless it's a whole postcode. Says whether both answered.
+async function remoteSuggestions(text, from, signal) {
+  const [codes, places] = await Promise.allSettled([
+    postcodeSuggestions(text, signal),
+    wholePostcode(text) ? Promise.resolve([]) : photonSuggestions(text, from, signal)]);
+  const failed = [codes, places].some(r => r.status === "rejected" && !(r.reason && r.reason.name === "AbortError"));
+  if (failed) remoteRest = Date.now() + SUGGEST.rest;
+  return { codes: codes.status === "fulfilled" ? codes.value : [], places: places.status === "fulfilled" ? places.value : [],
+           complete: !failed };
+}
+
+// Two that are the same place: a street in several pieces, a station found twice, a shop and its pharmacy
+function sameSuggestion(a, b) {
+  const miles = milesBetween(a, b);
+  if (a.recent || b.recent) return fold(a.label) === fold(b.label) && miles < 0.3;
+  if (a.kind === "station" && b.kind === "station") return miles < 0.15 || (fold(a.name) === fold(b.name) && miles < 0.5);
+  if ((a.kind === "centre") !== (b.kind === "centre")) return miles < 0.2 && /test centre/i.test(a.kind === "centre" ? b.name : a.name);
+  const group = s => (["city", "town", "area", "locality"].includes(s.kind) ? "settlement"
+    : ["place", "building", "parking"].includes(s.kind) ? "place" : s.kind);
+  if (fold(a.name) !== fold(b.name) || group(a) !== group(b)) return false;
+  if (a.kind === "street") return miles < 0.6 || (Boolean(a.outcode) && a.outcode === b.outcode && miles < 1.5);
+  return miles < 0.25;
+}
+// All of them in order, best first: how well the name matches, what kind of place, and how far away. When
+// enough have every word typed in their names, those with some only in their address are left out (shops on a
+// High Street, for "high street"); and when enough have them in either, those whose names don't start the way
+// it's typed (a Holy Cross School, for "kings cross").
+function rankSuggestions(text, from, remote) {
+  const typed = typedWords(text), house = /^\d/.test(text.trim());
+  const score = (s, level) => {
+    const k = s.recent ? RECENT_KIND : SUGGEST_KINDS[s.kind] || SUGGEST_KINDS.place;
+    const bonus = s.kind === "address" && house && !s.recent ? 1 : k.bonus;
+    return MATCH_COST[level] - bonus + (from ? k.far * Math.log2(1 + milesBetween(from, s) / 2) : 0) + 0.05 * (s.order || 0);
+  };
+  const pool = [...recentSuggestions(typed), ...centreSuggestions(typed), ...(remote ? [...remote.codes, ...remote.places] : [])]
+    .map(s => { const level = levelOf(s, typed); return { s, level, v: score(s, level) }; })
+    .sort((a, b) => a.v - b.v);
+  const distinct = [];
+  for (const x of pool) if (!distinct.some(y => sameSuggestion(y.s, x.s))) distinct.push(x);
+  const least = distinct.filter(x => x.level >= 3).length >= 2 ? 3 : distinct.filter(x => x.level >= 2).length >= 3 ? 2 : 0;
+  const keep = x => x.level >= least || (least === 2 && namedFirst(typed, x.s.words || []) > 0);
+  return distinct.filter(keep).slice(0, SUGGEST.most).map(x => x.s);
+}
+
+// The name with what's been typed in bold, like a map app
+function marked(name, typed) {
+  const wants = typed.flatMap(t => [t.w, t.full]).filter(Boolean).sort((a, b) => b.length - a.length);
+  return String(name).split(/([\s,/()&-]+)/).flatMap(part => {
+    const letters = fold(part).replace(/ /g, "");
+    const want = letters && wants.find(w => letters.startsWith(w));
+    if (!want) return [part];
+    let n = 0, cut = 0;
+    while (cut < part.length && n < want.length) { n += fold(part[cut]).length; cut++; }
+    return [el("b", {}, part.slice(0, cut)), part.slice(cut)];
+  });
+}
+const SUGGEST_ICONS = {
+  recent: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M12 7.6V12l3 1.9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  pin: '<svg viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M12 2.4a7.1 7.1 0 0 0-7.1 7.1c0 5.1 7.1 12.1 7.1 12.1s7.1-7 7.1-12.1A7.1 7.1 0 0 0 12 2.4Zm0 4.4a2.7 2.7 0 1 0 0 5.4 2.7 2.7 0 0 0 0-5.4Z"/></svg>',
+  street: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M8.2 3h2.2L8.6 21H4.3ZM13.6 3h2.2l3.9 18h-4.3Z"/><path fill="currentColor" d="M11.1 4.5h1.8v3.2h-1.8Zm0 5.4h1.8v3.6h-1.8Zm0 5.9h1.8v4.4h-1.8Z"/></svg>',
+  station: '<svg viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M7.5 2.8h9a3 3 0 0 1 3 3v9.4a3 3 0 0 1-2.4 2.9l1.9 3.1h-2.4l-1.7-2.8H9.1l-1.7 2.8H5l1.9-3.1a3 3 0 0 1-2.4-2.9V5.8a3 3 0 0 1 3-3Zm-.8 3.3v4.4h10.6V6.1Zm1.6 7.1a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8Zm7.4 0a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8Z"/></svg>',
+  postcode: '<svg viewBox="0 0 24 24"><rect x="3.6" y="5.6" width="16.8" height="12.8" rx="1.6" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="m4.6 7.2 7.4 5.9 7.4-5.9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg>',
+  shop: '<svg viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M8 7V6.2a4 4 0 0 1 8 0V7h3.2l.9 13.6H3.9L4.8 7Zm2 0h4v-.8a2 2 0 0 0-4 0Z"/></svg>',
+  food: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M5 2.5h1.5v6h1v-6H9v6h1v-6h1.5V9a3 3 0 0 1-2.2 2.9v9.6H7.2v-9.6A3 3 0 0 1 5 9Zm11.5 0c1.9 0 3 2.4 3 5.8 0 2.4-.9 3.9-2 4.4v8.8h-2.2v-19Z"/></svg>',
+  fuel: '<svg viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M4.5 3.5h9v15h-9Zm2 2v4.5h5V5.5ZM3 19h12v2.2H3Z"/><path d="M13.5 9h2a1.2 1.2 0 0 1 1.2 1.2v6.6a1.6 1.6 0 0 0 3.2 0V8l-2.6-2.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  you: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.6" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="12" cy="12" r="2.6" fill="currentColor"/><path d="M12 2.4v3.2M12 18.4v3.2M2.4 12h3.2M18.4 12h3.2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+};
+function suggestionIcon(s) {
+  const icon = s.recent ? "recent" : s.kind === "you" || s.kind === "nearby" ? "you" : s.kind === "postcode" ? "postcode"
+    : s.kind === "centre" || s.kind === "parking" ? s.kind : s.icon || "pin";
+  if (icon === "centre") return el("span", { className: "s-icon s-plate" }, "L");  // an L plate
+  if (icon === "parking") return el("span", { className: "s-icon s-park" }, "P");  // a car park sign
+  return el("span", { className: `s-icon${icon === "you" ? " s-you" : ""}`, html: SUGGEST_ICONS[icon] || SUGGEST_ICONS.pin });
+}
+const milesAway = miles => (miles < 9.95 ? `${miles.toFixed(1)} mi` : `${Math.round(miles)} mi`);
+const YOU_ROW = { kind: "you", name: "Your location", detail: "Start from where you are now", label: "" };
+const NEARBY_ROW = { kind: "nearby", name: "Show places near me", detail: "Uses your location to put the nearest first", label: "" };
+
+// A list under a search box as you type. choose(s) is called with the one chosen: tapped, or picked with the arrow
+// keys and Enter. you(), if given, is what "Your location" does, offered first when the box is empty.
+function suggestUnder(input, choose, you = null) {
   const holder = input.closest(".search") || input.parentElement;
   const list = el("ul", { id: `${input.id}-suggestions`, className: "suggest", role: "listbox", "aria-label": "Suggestions" });
   list.hidden = true;
@@ -1032,55 +1303,165 @@ function suggestUnder(input, near, choose) {
   holder.append(list);
   for (const [k, v] of Object.entries({ role: "combobox", "aria-autocomplete": "list", "aria-expanded": "false",
                                         "aria-controls": list.id })) input.setAttribute(k, v);
-  const cache = new Map();
-  let shown = [], active = -1, timer = 0, asked = 0, ctl = null;
+  const cache = new Map(), pending = new Set();  // what the servers said, and what they're being asked, by text and place
+  let shown = [], shownFor = null, allIn = false, active = -1, dismissed = null, lastAnswer = null, scrolled = false;
+  let timer = 0, firstAt = 0, lastAskAt = 0, flying = 0, seq = 0, newest = 0, era = 0, ctl = new AbortController();
+  const keyFor = (text, from) => `${fullText(text).toLowerCase()}|${nearKey(from)}`;
   const close = () => {
     list.hidden = true;
     list.replaceChildren();
+    list.classList.remove("loading");
     active = -1;
     input.setAttribute("aria-expanded", "false");
     input.removeAttribute("aria-activedescendant");
   };
-  const stop = () => { asked++; clearTimeout(timer); if (ctl) ctl.abort(); close(); };
+  const quiet = () => { era++; clearTimeout(timer); timer = 0; firstAt = 0; ctl.abort(); ctl = new AbortController(); };
+  const stop = () => { quiet(); close(); };
   const mark = i => {
     active = i;
     [...list.children].forEach((li, k) => li.setAttribute("aria-selected", String(k === i)));
     input.setAttribute("aria-activedescendant", `${list.id}-${i}`);
     list.children[i].scrollIntoView({ block: "nearest" });
   };
-  const show = found => {
+  // As tall as the screen allows above the keyboard, and the box moved up once if the list would hardly show
+  const fit = () => {
+    if (list.hidden) return;
+    const view = window.visualViewport, bottom = view ? view.offsetTop + view.height : window.innerHeight;
+    const box = input.getBoundingClientRect(), room = bottom - box.bottom - 18;
+    if (room < 220 && !scrolled && shown.length > 2) {
+      scrolled = true;
+      const up = box.top - (view ? view.offsetTop : 0) - 12;
+      if (up > 0) { window.scrollBy({ top: up, behavior: "smooth" }); setTimeout(fit, 400); }
+    }
+    list.style.maxHeight = `${Math.round(Math.max(150, Math.min(440, room)))}px`;
+  };
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", fit);
+    window.visualViewport.addEventListener("scroll", fit);
+  }
+  // waiting: more to come from the servers for this text, so a line moves along the top meanwhile
+  const render = (found, text, from, waiting = false) => {
     shown = found;
-    if (!found.length || document.activeElement !== input) { close(); return; }
-    list.replaceChildren(...found.map((s, i) => el("li", { id: `${list.id}-${i}`, role: "option", "aria-selected": "false",
-                                                          "data-i": i },
-      el("span", { className: "s-name" }, s.label), el("span", { className: "s-detail" }, s.detail))));
+    shownFor = text;
+    allIn = !waiting;
+    if (document.activeElement !== input || (!found.length && !waiting)) { close(); return; }
+    const typed = typedWords(text), real = from && from.real ? from : null;
+    const rows = found.map((s, i) => {
+      const away = real && Number.isFinite(s.lat) ? milesBetween(real, s) : 0;
+      const miles = away >= 0.05 ? milesAway(away) : "";
+      return el("li", { id: `${list.id}-${i}`, role: "option", "aria-selected": "false", "data-i": i },
+        el("span", { className: "s-lead", "aria-hidden": "true" }, suggestionIcon(s),
+           miles ? el("span", { className: "s-miles" }, miles) : null),
+        el("span", { className: "s-text" },
+          el("span", { className: "s-name" }, ...marked(s.name, typed)),
+          s.detail ? el("span", { className: "s-detail" }, s.detail) : null,
+          miles ? el("span", { className: "visually-hidden" }, `, ${miles.replace("mi", "miles")} away`) : null));
+    });
+    list.replaceChildren(...(rows.length ? rows : [el("li", { className: "s-wait", role: "presentation" }, "Searching...")]));
+    list.classList.toggle("loading", waiting);
+    list.setAttribute("aria-busy", String(waiting));
     active = -1;
     input.removeAttribute("aria-activedescendant");
     list.hidden = false;
     input.setAttribute("aria-expanded", "true");
+    fit();
   };
-  const pick = s => { stop(); input.value = s.label; choose(s); };
-  const ask = async text => {
-    const o = near(), key = `${text.toLowerCase()}|${o ? `${o.lat.toFixed(2)},${o.lon.toFixed(2)}` : ""}`;
-    if (cache.has(key)) { show(cache.get(key)); return; }
-    const mine = ++asked;
-    if (ctl) ctl.abort();
-    ctl = new AbortController();
-    const found = await suggestionsFor(text, o, ctl.signal);
-    if (mine !== asked || input.value.trim() !== text) return;  // typed on since, or chosen
-    cache.set(key, found);
-    show(found);
+  // What the servers last said, for text that's grown (or shrunk) since, as long as it still fits
+  const stale = (text, from) => {
+    if (!lastAnswer || lastAnswer.near !== nearKey(from)) return null;
+    const a = fold(lastAnswer.text), b = fold(text);
+    if (!a.startsWith(b) && !b.startsWith(a)) return null;
+    const typed = typedWords(text), fits = s => levelOf(s, typed) >= 2;
+    return { codes: lastAnswer.remote.codes.filter(fits), places: lastAnswer.remote.places.filter(fits) };
   };
-  input.addEventListener("input", () => {
+  const refresh = () => {
+    const text = input.value.trim(), from = suggestFrom();
+    if (!text) {
+      quiet();
+      const here = s => from && from.real && milesBetween(from, s) < 0.05;  // the start itself
+      const mine = recentSuggestions([]).filter(s => !here(s)).slice(0, SUGGEST.recent);
+      render(you && canLocate() ? [YOU_ROW, ...mine] : mine, "", from);
+      return;
+    }
+    if (text === dismissed) return;
+    const cached = cache.get(keyFor(text, from));
+    const waiting = !cached && text.length >= 2 && Date.now() >= remoteRest;
+    let found = rankSuggestions(text, from, cached || stale(text, from));
+    if (!from && found.length && text.length >= 2 && !nearbyRefused && canLocate() && !looksLikePostcode(text)) {
+      found = [...found, NEARBY_ROW];  // nowhere to put first: offer to find out
+    }
+    render(found, text, from, waiting);
+    if (waiting) schedule();
+  };
+  // About 150 ms after typing stops, or 700 ms after it started if it doesn't, but not within 500 ms of the last
+  // question, nor while two are waiting for answers
+  const schedule = () => {
+    const now = Date.now();
+    if (!firstAt) firstAt = now;
     clearTimeout(timer);
-    const text = input.value.trim();
-    if (!text) { stop(); return; }
-    show(centreSuggestions(text, near()));  // straight away, while the rest are asked for
-    timer = setTimeout(() => ask(text), SUGGEST.pause);
-  });
+    const at = Math.max(lastAskAt + SUGGEST.gap, Math.min(now + SUGGEST.pause, firstAt + SUGGEST.wait));
+    timer = setTimeout(ask, Math.max(0, at - now));
+  };
+  const ask = async () => {
+    timer = 0;
+    const text = input.value.trim(), from = suggestFrom(), key = keyFor(text, from);
+    if (text.length < 2 || text === dismissed || cache.has(key) || pending.has(key) || Date.now() < remoteRest ||
+        document.activeElement !== input) { firstAt = 0; return; }
+    if (flying >= SUGGEST.flying) { schedule(); return; }
+    firstAt = 0;
+    const mine = ++seq, now = era;
+    flying++;
+    pending.add(key);
+    lastAskAt = Date.now();
+    let remote;
+    try { remote = await remoteSuggestions(text, from, ctl.signal); } finally { flying--; pending.delete(key); }
+    if (now !== era) return;  // chosen, cleared or closed since
+    if (remote.complete) cache.set(key, remote);
+    if (mine > newest) { newest = mine; lastAnswer = { text, near: nearKey(from), remote }; }
+    if (document.activeElement === input) refresh();
+  };
+  // The top one, once everything's in, if it plainly is what was typed (every word typed starts a word of its name)
+  const best = text => (text && text === shownFor && allIn && text !== dismissed && shown[0] &&
+                        levelOf(shown[0], typedWords(text)) >= 3 ? shown[0] : null);
+  // When a search finds nothing: the best of what would be suggested for it, asked for if need be
+  const bestFor = async text => {
+    const from = suggestFrom(), typed = typedWords(text), key = keyFor(text, from);
+    let remote = cache.get(key);
+    if (!remote) {
+      remote = await remoteSuggestions(text, from, undefined);
+      if (remote.complete) cache.set(key, remote);
+    }
+    const top = rankSuggestions(text, from, remote)[0];
+    return top && levelOf(top, typed) >= 2 ? top : null;
+  };
+  // Asked for from the list: the phone's location, only to put nearby places first
+  const askNearby = () => {
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        deviceAt = { lat: pos.coords.latitude, lon: pos.coords.longitude, at: Date.now() };
+        input.focus({ preventScroll: true });
+        refresh();
+      },
+      () => { nearbyRefused = true; if (document.activeElement === input) refresh(); },
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 10 * 60000 });
+  };
+  const pick = s => {
+    if (s.kind === "nearby") { askNearby(); return; }
+    stop();
+    if (s.kind === "you") { input.value = ""; input.blur(); you(); return; }
+    input.value = s.label;
+    remember(s);
+    choose(s);
+  };
+  input.addEventListener("input", () => { dismissed = null; refresh(); });
+  input.addEventListener("focus", () => { scrolled = false; dismissed = null; refresh(); });
+  input.addEventListener("click", () => { if (list.hidden) { dismissed = null; refresh(); } });
   input.addEventListener("keydown", e => {
-    if (list.hidden) return;
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    if (list.hidden) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); dismissed = null; refresh(); }
+      return;
+    }
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && shown.length) {
       e.preventDefault();
       const n = shown.length, step = e.key === "ArrowDown" ? 1 : -1;
       mark(active < 0 ? (step > 0 ? 0 : n - 1) : (active + step + n) % n);
@@ -1089,17 +1470,32 @@ function suggestUnder(input, near, choose) {
       pick(shown[active]);
     } else if (e.key === "Escape") {
       e.preventDefault();
+      dismissed = input.value.trim();
+      quiet();
       close();
     }
   });
-  input.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== input) close(); }, 150));
+  input.addEventListener("blur", () => setTimeout(() => {
+    if (document.activeElement !== input) { clearTimeout(timer); timer = 0; firstAt = 0; close(); }
+  }, 150));
   list.addEventListener("mousedown", e => e.preventDefault());  // the box keeps the keyboard while one is tapped
   list.addEventListener("click", e => {
     e.preventDefault();  // inside a label, a click would otherwise go on to the box
     const li = e.target.closest("li[data-i]");
     if (li) pick(shown[Number(li.dataset.i)]);
   });
-  return { stop };
+  return { stop, best, bestFor, pick };
+}
+
+// What was typed in a box, as a place: the top suggestion if it's plainly that, else a postcode or a town from
+// postcodes.io, else the best suggestion for it (postcodes.io knows towns and villages, not streets or shops)
+async function findPlace(text, near, suggest) {
+  const shown = suggest && suggest.best(text);
+  if (shown) return { place: { lat: shown.lat, lon: shown.lon, label: shown.label }, chosen: shown };
+  const place = await lookUp(text, near);
+  if (place) return { place, chosen: null };
+  const found = suggest ? await suggest.bestFor(text).catch(() => null) : null;
+  return found ? { place: { lat: found.lat, lon: found.lon, label: found.label }, chosen: found } : { place: null, chosen: null };
 }
 
 function setOrigin(origin, text = "") {
@@ -1984,18 +2380,20 @@ async function buildTrip(event) {
     }
     if (destText !== t.destText || !t.dest) {
       setStatus(`Looking up ${destText}...`);
-      let place;
+      let found;
       try {
-        place = await lookUp(destText, state.origin);
+        found = await findPlace(destText, state.origin, destSuggest);
       } catch (err) {
         setStatus("The postcode search isn't answering. Check your connection, then try again.", true);
         return;
       }
-      if (!place) {
-        setStatus(`Couldn't find "${destText}". Try a full postcode, or the name of a town.`, true);
+      if (!found.place) {
+        setStatus(`Couldn't find "${destText}". Try a postcode, or the name of a town or street.`, true);
         return;
       }
-      Object.assign(t, { dest: place, destText, result: null });
+      rememberFound(destText, found.place, found.chosen);
+      if (found.chosen) $("dest").value = found.chosen.label;
+      Object.assign(t, { dest: found.place, destText: found.chosen ? found.chosen.label : destText, result: null });
       $("dest").blur();
     }
     if (!t.activities.size) {  // nothing to practise: the quickest way there
@@ -3325,6 +3723,8 @@ function setUpSettings() {
   };
   button.addEventListener("click", () => open(panel.hidden));
   $("settings-done").addEventListener("click", () => { open(false); button.focus(); });
+  $("forget-recent").addEventListener("click", forgetRecent);
+  showForgetRecent();
   panel.addEventListener("keydown", e => { if (e.key === "Escape") { open(false); button.focus(); } });
   const log = $("keep-log");
   log.checked = logging();
@@ -3490,11 +3890,11 @@ async function start() {
   for (const b of document.querySelectorAll(".mode")) b.addEventListener("click", () => setMode(b.dataset.mode));
   $("locate").addEventListener("click", locate);
   $("search").addEventListener("submit", search);
-  placeSuggest = suggestUnder($("place"), () => state.origin, s => {
+  placeSuggest = suggestUnder($("place"), s => {
     $("place").blur();
     setOrigin({ lat: s.lat, lon: s.lon, label: s.label }, s.label);
-  });
-  destSuggest = suggestUnder($("dest"), () => state.origin, s => {
+  }, locate);
+  destSuggest = suggestUnder($("dest"), s => {
     Object.assign(state.trip, { dest: { lat: s.lat, lon: s.lon, label: s.label }, destText: s.label, result: null });
     $("dest").blur();
   });
