@@ -283,6 +283,9 @@
   .answer { margin: 12px 0 0; padding: 10px 12px; background: var(--pavement); border-left: 6px solid var(--black); border-radius: 6px; }
   .answer p { margin: 0; }
   .answer .answer-label { font-weight: 700; font-size: 15px; }
+  .reveal-answer { width: 100%; margin-top: 12px; }
+  .settings .voice-option { margin: 4px 0 0; grid-template-columns: 1fr; gap: 4px; }
+  .settings .voice-option .option-name { font-weight: 400; }
   .result { position: sticky; top: 8px; z-index: 5; margin: 12px 0; padding: 14px 16px; border-radius: 12px; color: var(--white); }
   .result.pass { background: var(--blue); }
   .result.fail { background: var(--red); }
@@ -365,6 +368,15 @@
         <p id="recent-hint" class="hint">None yet. The places you choose are shown first when you tap a search box.</p>
         <button id="forget-recent" class="btn forget" type="button" disabled>Forget them</button>
       </fieldset>
+      <fieldset id="voice-setting" class="setting">
+        <legend>Voice</legend>
+        <label class="option voice-option"><span class="option-name">Spoken by</span>
+          <select id="voice-choice"></select></label>
+        <button id="voice-sample" class="btn forget" type="button">Play a sample</button>
+        <p class="hint">The voices are your phone's own. iPhones only let web pages use their basic voices. On Android,
+           a better British voice can be installed in the phone's text-to-speech settings (search Settings for
+           "text-to-speech").</p>
+      </fieldset>
       <fieldset class="setting">
         <legend>Troubleshooting</legend>
         <label class="tick"><input id="keep-log" type="checkbox"> Keep a log</label>
@@ -435,6 +447,7 @@
       <p class="hint">An eyesight check and a 'tell me' question first, a 'show me' question on the move, normal
          stops and an examiner's instructions, then a marking sheet.</p>
       <label class="tick" id="show-route-tick"><input id="show-route" type="checkbox"> Show me the route first</label>
+      <label class="tick" id="show-me-tick"><input id="show-me" type="checkbox"> A 'show me' question while driving</label>
     </div>
     <button id="build" class="btn btn-go" type="submit">Build my test</button>
   </form>
@@ -547,7 +560,8 @@ const DEBUG = location.hash === "#debug";  // the log, whatever the settings say
 
 // Settings, kept on this phone
 const SETTINGS_KEY = "driving-practice-settings";
-const settings = { repick: true, log: false, realTest: true, showRoute: false, testCentre: "", ...loadSettings() };
+const settings = { repick: true, log: false, realTest: true, showRoute: false, showMe: true, testCentre: "", voice: "",
+                   ...loadSettings() };
 function loadSettings() {
   try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"); } catch (err) { return {}; }
 }
@@ -2242,6 +2256,7 @@ function beforeYouDrive(r) {
     b.step = key === "eyesight" ? "tellme" : "ready";
     renderTest();
     scrollTo("start-test");
+    hush();  // the step that was being read out is over
     say(b.step === "tellme" ? b.tellMe.q : BRIEFING, "info");
   };
   const buttons = (yes, no, key) => el("div", { className: "actions" },
@@ -2252,12 +2267,22 @@ function beforeYouDrive(r) {
       el("p", {}, EYESIGHT),
       buttons("I read it", "I couldn't read it", "eyesight"));
   }
-  if (b.step === "tellme") {
+  if (b.step === "tellme") {  // the answer stays hidden until it's been given
+    const good = el("div", { className: "answer", id: "tell-me-answer" },
+      el("p", { className: "answer-label" }, "A good answer:"),
+      el("p", {}, b.tellMe.a));
+    good.hidden = !b.answerShown;
+    const reveal = el("button", { className: "btn reveal-answer", type: "button", "aria-controls": "tell-me-answer",
+                                  "aria-expanded": String(!!b.answerShown) }, b.answerShown ? "Hide the answer" : "Reveal answer");
+    reveal.addEventListener("click", () => {
+      b.answerShown = !b.answerShown;
+      good.hidden = !b.answerShown;
+      reveal.textContent = b.answerShown ? "Hide the answer" : "Reveal answer";
+      reveal.setAttribute("aria-expanded", String(b.answerShown));
+    });
     return step("Before you drive: 2 of 2", "'Tell me' question",
       el("p", { className: "question" }, b.tellMe.q),
-      el("div", { className: "answer" },
-        el("p", { className: "answer-label" }, "For the supervisor, a good answer:"),
-        el("p", {}, b.tellMe.a)),
+      reveal, good,
       buttons("Right", "Wrong", "tellMeRight"));
   }
   return step("Ready", "The drive",
@@ -2274,6 +2299,7 @@ function beginTest(r) {
   r.driven = false;
   renderTest();
   scrollTo("start-test");
+  hush();
   say(EYESIGHT, "info");  // straight from the tap: iPhones only speak after one
 }
 
@@ -2300,14 +2326,20 @@ function setUpTestOptions() {
     if (state.mode === "test") renderTest();
   });
   // Like the real test, and whether to see the route first: kept on the phone
-  const real = $("real-test"), show = $("show-route");
+  const real = $("real-test"), show = $("show-route"), showMe = $("show-me");
   real.checked = settings.realTest;
   show.checked = settings.showRoute;
-  $("show-route-tick").hidden = !real.checked;
+  showMe.checked = settings.showMe;
+  $("show-route-tick").hidden = $("show-me-tick").hidden = !real.checked;
+  // a 'show me' question can be left out: it can distract, with an instructor marking or on your own
+  showMe.addEventListener("change", () => {
+    settings.showMe = showMe.checked;
+    saveSettings();
+  });
   real.addEventListener("change", () => {
     settings.realTest = real.checked;
     saveSettings();
-    $("show-route-tick").hidden = !real.checked;
+    $("show-route-tick").hidden = $("show-me-tick").hidden = !real.checked;
     if (state.result && state.mode === "test" && !drive) {
       state.result.real = real.checked;
       renderTest();
@@ -3101,7 +3133,7 @@ const DRIVE = {
 };
 let drive = null;
 let lastModel = { overhead: TEST.overhead, pace: TEST.pace };
-const voice = { on: true, chosen: null, current: null, said: null, since: 0 };
+const voice = { on: true, chosen: null, current: null, said: null, since: 0, hushes: 0, hushedAt: 0 };
 
 const metresBetween = (a, b) => milesBetween(a, b) * 1609.34;
 const lowerFirst = text => text ? text[0].toLowerCase() + text.slice(1) : "";
@@ -3173,28 +3205,104 @@ function wordsFor(m) {
   return { now, show: now.replace(/\.$/, ""), arrow: arrowFor(m.type) };
 }
 
+// The phone's voices that can say directions, best first: British English, then the most natural sounding
+// (premium, enhanced and online voices). Apple's joke voices and its old-fashioned ones (Eddy, Flo, Grandpa
+// and the like) sound like robots, so they're left out.
+const ROBOT_VOICES = /\b(albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|good news|hysterical|jester|junior|kathy|organ|princess|ralph|superstar|trinoids|whisper|wobble|zarvox|fred|eddy|flo|grandma|grandpa|reed|rocko|sandy|shelley)\b/i;
+function voiceScore(v) {
+  const lang = String(v.lang || "").replace("_", "-").toLowerCase();
+  if (!lang.startsWith("en") || ROBOT_VOICES.test(v.name || "") || /eloquence/i.test(v.voiceURI || "")) return -1;
+  const about = `${v.name} ${v.voiceURI}`.toLowerCase();
+  let score = lang === "en-gb" ? 60 : /^en-(ie|au|nz|za)/.test(lang) ? 30 : 20;
+  if (/premium/.test(about)) score += 30;
+  else if (/enhanced|neural|natural|wavenet/.test(about)) score += 25;
+  else if (/google|online/.test(about)) score += 15;
+  if (/compact/.test(about)) score -= 5;
+  if (/\b(daniel|serena|kate|stephanie|arthur|martha|sonia|ryan|libby|hazel|george|susan)\b/.test(about)) score += 5;
+  return score + (v.default ? 1 : 0);
+}
+const goodVoices = () => ("speechSynthesis" in window ? speechSynthesis.getVoices() : [])
+  .map(v => ({ v, score: voiceScore(v) })).filter(x => x.score >= 0)
+  .sort((a, b) => b.score - a.score || a.v.name.localeCompare(b.v.name)).map(x => x.v);
+
+// The voice chosen in Settings, or the best there is
 function pickVoice() {
-  if (!("speechSynthesis" in window)) return;
-  const voices = speechSynthesis.getVoices();
-  voice.chosen = voices.find(v => v.lang === "en-GB") || voices.find(v => /^en[-_]GB/i.test(v.lang)) ||
-                 voices.find(v => /^en/i.test(v.lang)) || null;
+  const voices = goodVoices();
+  voice.chosen = voices.find(v => v.voiceURI === settings.voice) || voices[0] || null;
+  showVoices(voices);
+}
+
+// Road numbers as people in Britain say them, figure by figure from three figures, with "oh" for zero:
+// "the A two one seven", "the B two two three oh", but "the M twenty-five". The letter stays joined to the
+// first figure, so it's read as a letter and not as "a". And "the" before the number, as in "onto the A217".
+function spokenText(text) {
+  return String(text)
+    .replace(/(\bthe\s+)?\b([ABM])(\d{1,4})(\(M\))?(?![\w(])(?!\s+\d[A-Z]{2}\b)/g, (all, the, letter, digits, motorway, at, whole) => {
+      const figures = digits.length <= 2 ? digits : `${digits[0]} ${[...digits.slice(1)].map(d => d === "0" ? "oh" : d).join(" ")}`;
+      const needsThe = !the && /(\bonto|\bon|\btake|\bjoin|\bvia|\btowards?|\bfor|,)\s*$/i.test(whole.slice(0, at));
+      return `${the || (needsThe ? "the " : "")}${letter}${figures}${motorway ? " M" : ""}`;
+    })
+    .replace(/\btoward\b/g, "towards")
+    .replace(/\s*\/\s*/g, ", ");
+}
+
+// Stop whatever's being said, and whatever's waiting to be: a tap that moves things on has the floor
+function hush() {
+  voice.hushes++;  // so a word waiting to be said after the last one isn't
+  Object.assign(voice, { current: null, said: null });
+  if (!("speechSynthesis" in window) || !(speechSynthesis.speaking || speechSynthesis.pending)) return;
+  speechSynthesis.cancel();
+  voice.hushedAt = Date.now();
 }
 
 // Say something. Kinds: "alert", a direction coming up, which may be cut short by the next one; "now", a
 // direction to act on; "stop", what to do at a stop; and "info". Only an alert is ever cut short: the
-// rest wait their turn.
-function say(text, kind = "info") {
+// rest wait their turn, unless a tap moves things on (hush).
+function say(text, kind = "info", evenMuted = false) {
   if (!text) return;
   logPlanner(`said: ${text}`);
-  if (!voice.on || !("speechSynthesis" in window)) return;
+  if ((!voice.on && !evenMuted) || !("speechSynthesis" in window)) return;
   const saying = voice.current && Date.now() - voice.since < 20000 ? voice.current : null;  // phones can miss an end
-  if (kind === "now" && saying === "alert") speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
+  if (kind === "now" && saying === "alert") hush();
+  const u = new SpeechSynthesisUtterance(spokenText(text));
   u.lang = "en-GB";
   if (voice.chosen) u.voice = voice.chosen;
   u.onstart = () => Object.assign(voice, { current: kind, said: u, since: Date.now() });
   u.onend = u.onerror = () => { if (voice.said === u) Object.assign(voice, { current: null, said: null }); };
-  speechSynthesis.speak(u);
+  // phones can drop what's said straight after stopping, so wait a moment then
+  const wait = 250 - (Date.now() - (voice.hushedAt || 0)), hushes = voice.hushes;
+  if (wait <= 0) speechSynthesis.speak(u);
+  else setTimeout(() => { if (voice.hushes === hushes && (voice.on || evenMuted)) speechSynthesis.speak(u); }, wait);
+}
+
+// Settings: which of the phone's voices, and a sample to hear it
+function showVoices(voices = goodVoices()) {
+  const select = $("voice-choice");
+  if (!select) return;
+  $("voice-setting").hidden = !voices.length;
+  const label = v => {  // "Daniel", not "Daniel (English (United Kingdom))"
+    const name = v.name.replace(/\s*-\s*English\s*\([^()]*\)\s*$/i, "").replace(/\s*\(English[^()]*(\([^()]*\))?[^()]*\)\s*$/i, "");
+    return `${name || v.name}${/gb/i.test(v.lang) ? "" : ` (${v.lang})`}`;
+  };
+  select.replaceChildren(
+    el("option", { value: "" }, voices[0] ? `Automatic: ${label(voices[0])}` : "Automatic"),
+    ...voices.map(v => el("option", { value: v.voiceURI }, label(v))));
+  select.value = voices.some(v => v.voiceURI === settings.voice) ? settings.voice : "";
+}
+function setUpVoice() {
+  if (!("speechSynthesis" in window)) { $("voice-setting").hidden = true; return; }
+  pickVoice();
+  speechSynthesis.addEventListener("voiceschanged", pickVoice);  // they can come a moment after the page
+  $("voice-choice").addEventListener("change", e => {
+    settings.voice = e.target.value;
+    saveSettings();
+    pickVoice();
+  });
+  $("voice-sample").addEventListener("click", () => {
+    hush();
+    say("In 300 yards, turn left onto Brighton Road, B2230. Then, at the roundabout, take the second exit onto A217.",
+        "info", true);
+  });
 }
 
 async function keepScreenOn() {
@@ -3235,7 +3343,8 @@ function driveTest(r, from = null) {
                arrived: `You're back at ${back}. That's the end of your mock test.`, at: { lat: o.lat, lon: o.lon } });
   // like the real test, from the start only (a stop's Drive there is practice)
   const test = r.real && from == null && r.before ? {
-    showMe: r.before.showMe, extras: [{ kind: "showme" }, { kind: "pullup", type: "angle" }, { kind: "pullup", type: "normal" }],
+    showMe: r.before.showMe,
+    extras: [...(settings.showMe ? [{ kind: "showme" }] : []), { kind: "pullup", type: "angle" }, { kind: "pullup", type: "normal" }],
   } : null;
   startDriving({ legs: r.legs, stops, vias, test }, from);
 }
@@ -3318,7 +3427,7 @@ function startDriving(trip, from = null) {
   document.body.classList.add("driving");
   $("drive").hidden = $("drive-bar").hidden = false;
   pickVoice();
-  if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = pickVoice;
+  hush();  // what was being said before (the briefing, say) is over
   // the first words come straight from the tap: iPhones only speak after one
   const first = drive.route && drive.route.events.find(e => e.kind === "start");
   if (first) first.done = true;
@@ -3783,7 +3892,7 @@ function stopDriving() {
   clearInterval(drive.timer);
   const test = drive.test, r = state.result;
   if (drive.wake) drive.wake.release().catch(() => {});
-  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  hush();
   if (!drive.finished) logPlanner("ended");
   drive = null;
   document.body.classList.remove("driving");
@@ -3837,7 +3946,7 @@ function setUpDriving() {
     voice.on = !voice.on;
     $("mute").setAttribute("aria-pressed", String(!voice.on));
     $("mute").textContent = voice.on ? "Mute" : "Unmute";
-    if (!voice.on && "speechSynthesis" in window) speechSynthesis.cancel();
+    if (!voice.on) hush();
   });
   document.addEventListener("visibilitychange", () => {
     if (drive && !drive.finished && document.visibilityState === "visible") keepScreenOn();
@@ -3984,6 +4093,7 @@ async function start() {
   setUpTripOptions();
   setUpDriving();
   setUpSettings();
+  setUpVoice();
   if (logging()) {
     logPlanner(`page opened: ${navigator.userAgent.match(/iPhone|Android|Windows|Mac/)?.[0] || "browser"}`);
   }
