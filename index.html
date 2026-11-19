@@ -483,8 +483,10 @@
        OpenStreetMap data, so treat them as suggestions.</p>
     <p>Test wording and the 'show me, tell me' questions are adapted from DVSA guidance on GOV.UK, under the
        <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/">Open Government Licence</a>.</p>
-    <p>Map &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors.
-       Postcode and town search by <a href="https://postcodes.io">postcodes.io</a>. Routes by
+    <p>Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, map style
+       by <a href="https://stadiamaps.com/attribution/">Stadia Maps</a> and <a href="https://openmaptiles.org/">OpenMapTiles</a>.
+       Search by <a href="https://photon.komoot.io">Photon</a> from komoot, <a href="https://postcodes.io">postcodes.io</a>
+       and <a href="https://stadiamaps.com/">Stadia Maps</a>. Routes by
        <a href="https://github.com/valhalla/valhalla">Valhalla</a>, on a free server run by
        <a href="https://www.fossgis.de">FOSSGIS</a>.</p>
   </footer>
@@ -998,9 +1000,13 @@ async function search(event) {
 // Britain. Photon takes about a second to answer, so its last answer is narrowed down as you go on typing, and the
 // next question is already on its way. komoot's free server is for fair use: no more than two questions at once,
 // at most two a second, never twice the same, none for a whole postcode, and none for a few seconds if it stops
-// answering. Choosing one goes straight there, without looking it up again.
+// answering. If Photon fails, or says nothing for 4 seconds, Stadia Maps is asked instead for the next minute.
+// Stadia's searches use up the credit on its free plan (20 credits each), and it knows addresses but not what a
+// place is, so it's only the stand-in. Choosing one goes straight there, without looking it up again.
 const SUGGEST = { pause: 150, gap: 500, wait: 700, flying: 2, rest: 8000, most: 7, recent: 5, keep: 8, around: 0.05,
-                  photon: "https://photon.komoot.io/api/", gb: "-8.7,49.8,1.9,60.9" };
+                  photon: "https://photon.komoot.io/api/", gb: "-8.7,49.8,1.9,60.9", photonWait: 4000, photonRest: 60000,
+                  stadia: "https://api.stadiamaps.com/geocoding/v1/autocomplete",
+                  stadiaLayers: "venue,address,street,locality,localadmin,borough,neighbourhood" };
 const RECENT_KEY = "driving-practice-recent";
 // How likely each kind is to be the one wanted: a head start, and how much being far away counts against it
 const SUGGEST_KINDS = {
@@ -1041,6 +1047,7 @@ let placeSuggest = null, destSuggest = null;
 let deviceAt = null;        // where the phone is, when it's said: only to put nearby places first
 let nearbyRefused = false;  // asked for the phone's location from the list, and told no
 let remoteRest = 0;         // until when the servers are left alone, after one didn't answer
+let photonRest = 0;         // until when Stadia is asked instead of Photon, after Photon didn't answer
 
 // Letters only, the same however it's written: "King's" and "kings", "Café" and "cafe", "M&S" and "m and s"
 const fold = text => String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
@@ -1209,17 +1216,96 @@ function aroundBox(p) {
 async function photonSuggestions(text, from, signal) {
   const q = encodeURIComponent(fullText(text));
   const near = from ? { lat: Number(from.lat.toFixed(2)), lon: Number(from.lon.toFixed(2)) } : null;  // a km is near enough
+  const timed = new AbortController(), giveUp = setTimeout(() => timed.abort(), SUGGEST.photonWait);
+  const typedOn = () => timed.abort();
+  if (signal && signal.aborted) timed.abort();
+  else if (signal) signal.addEventListener("abort", typedOn, { once: true });
   const ask = box => getJSON(`${SUGGEST.photon}?q=${q}&limit=10&lang=en&bbox=${box}` +
-                             (near ? `&lat=${near.lat}&lon=${near.lon}` : ""), signal)
+                             (near ? `&lat=${near.lat}&lon=${near.lon}` : ""), timed.signal)
     .then(r => ((r && r.features) || []).map(photonSuggestion).filter(Boolean));
-  const lists = await Promise.all(near ? [ask(aroundBox(near)), ask(SUGGEST.gb)] : [ask(SUGGEST.gb)]);
-  return lists.flat();
+  try {
+    const lists = await Promise.all(near ? [ask(aroundBox(near)), ask(SUGGEST.gb)] : [ask(SUGGEST.gb)]);
+    return lists.flat();
+  } catch (err) {
+    if (signal && signal.aborted) throw err;  // typed on, chosen or closed: nothing wrong with Photon
+    throw new Error(`Photon didn't answer: ${(err && err.message) || err}`);  // an error, or too slow
+  } finally {
+    clearTimeout(giveUp);
+    if (signal) signal.removeEventListener("abort", typedOn);
+  }
 }
-// From the servers: postcodes, and Photon's places unless it's a whole postcode. Says whether both answered.
+
+// Words in names that say what a place is, as Stadia doesn't (letters as fold makes them)
+const STATION_NAME = /\b(station|halt)$/;
+const NOT_STATION = /\b(police|fire|ambulance|bus|coach|filling|petrol|service|power|pumping|lifeboat|coastguard|polling|radio|charging|weather|research|space|gas|sub|transformer)\b/;
+const FUEL_NAME = /\b(filling station|petrol station|service station|services|petrol|shell|esso|texaco|murco|gulf|jet|bp|applegreen|charging|chargepoint|supercharger|instavolt|gridserve|pod point|ionity|osprey|fastned)\b/;
+const FOOD_NAME = /\b(cafe|coffee|restaurant|pub|bar|grill|kitchen|pizza|pizzeria|burger|kebab|takeaway|bakery|diner|bistro|brasserie|tavern|chippy|mcdonalds|kfc|nandos|greggs|subway|starbucks|costa|pret|dominos|wetherspoon|wetherspoons|wagamama|five guys|pizza hut|papa johns|harvester|toby carvery|beefeater)\b/;
+const SHOP_NAME = /\b(tesco|sainsburys|asda|morrisons|aldi|lidl|waitrose|co op|coop|iceland|m and s|marks and spencer|b and q|homebase|ikea|argos|boots|superdrug|primark|currys|halfords|wickes|screwfix|toolstation|costco|b and m|home bargains|poundland|the range|dunelm|matalan|tk maxx|john lewis|sports direct|decathlon|pets at home|whsmith|spar|londis|nisa|budgens|one stop|farmfoods|supermarket|superstore|shopping centre|retail park|market|mall|outlet|store|stores|shop)\b/;
+
+// One of Stadia's answers as a suggestion, or null for what nobody drives to (a bus stop, a bus route)
+function stadiaSuggestion(f, order) {
+  const p = f.properties || {}, [lon, lat] = (f.geometry && f.geometry.coordinates) || [];
+  const bare = String(p.name || "").trim(), folded = fold(bare);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !bare || (p.country_code && p.country_code !== "GB")) return null;
+  if (/[\u2192\u21d2\u2194]|=>/.test(bare) || /\(\d{1,3}[a-z]?\)$/i.test(bare) || /\bbus stop\b/.test(folded) ||
+      (bare.includes(" / ") && !p.housenumber && !p.postalcode)) {
+    return null;  // a bus or train route ("Gatwick Express: Brighton → London Victoria"), a bus stop ("Cheam Road / Mulgrave Road")
+  }
+  const kind = p.layer === "street" ? "street" : p.layer === "address" ? "address"
+    : p.layer === "locality" || p.layer === "localadmin" ? "town"
+    : p.layer === "borough" || p.layer === "neighbourhood" ? "area"
+    : p.layer !== "venue" ? null
+    : STATION_NAME.test(folded) && !NOT_STATION.test(folded) ? "station"
+    : /\bairport$/.test(folded) ? "airport"
+    : /\b(car park|parking)\b/.test(folded) ? "parking" : "place";
+  if (!kind) return null;
+  const icon = kind === "street" || kind === "station" ? kind
+    : FUEL_NAME.test(folded) ? "fuel" : FOOD_NAME.test(folded) ? "food" : SHOP_NAME.test(folded) ? "shop" : "pin";
+  const outcode = p.postalcode ? String(p.postalcode).trim().toUpperCase().split(/\s+/)[0] : "";
+  const other = list => list.find(x => x && fold(x) !== folded) || "";
+  const town = other([p.neighbourhood, p.borough, p.locality, p.localadmin, p.county]);
+  const street = p.street && fold(p.street) !== folded ? p.street : "";
+  const area = [town, outcode].filter(Boolean).join(" ");
+  let detail, label = town ? `${bare}, ${town}` : bare;
+  if (kind === "town" || kind === "area") {  // the bigger place it's in
+    const bigger = kind === "town" ? other([p.macrocounty, p.county, p.region]) : other([p.locality, p.borough, p.macrocounty]);
+    detail = [kind === "town" ? "Town" : "Area", bigger].filter(Boolean).join(", ");
+    label = bigger ? `${bare}, ${bigger}` : bare;
+  } else if (kind === "street" || kind === "address") {
+    detail = [kind === "street" ? "Street" : "Address", area].filter(Boolean).join(", ");
+  } else {  // a shop, a station or a car park: its address, to tell branches apart
+    const word = { station: "Station", airport: "Airport", parking: "Car park" }[kind];
+    detail = [word, p.housenumber && street ? `${p.housenumber} ${street}` : street, area].filter(Boolean).join(", ");
+    if (street) label = `${bare}, ${street}`;
+  }
+  return { name: bare, label, detail, kind, icon, lat, lon, outcode, order, words: wordsOf(bare),
+           more: wordsOf([street, p.neighbourhood, p.borough, p.locality, p.localadmin, p.county].join(" ")) };
+}
+// Stadia's places for what's typed, nearest where you're searching from first: one question, as it puts what's
+// near first by itself (while Photon is left alone)
+async function stadiaSuggestions(text, from, signal) {
+  const near = from ? `&focus.point.lat=${from.lat.toFixed(2)}&focus.point.lon=${from.lon.toFixed(2)}` : "";
+  const r = await getJSON(`${SUGGEST.stadia}?text=${encodeURIComponent(fullText(text))}&lang=en&size=10` +
+                          `&boundary.country=GB&layers=${SUGGEST.stadiaLayers}${near}`, signal);
+  return ((r && r.features) || []).map(stadiaSuggestion).filter(Boolean);
+}
+// Places from Photon, or from Stadia when Photon doesn't answer (and for the next minute)
+async function placeSuggestions(text, from, signal) {
+  if (Date.now() >= photonRest) {
+    try {
+      return await photonSuggestions(text, from, signal);
+    } catch (err) {
+      if (signal && signal.aborted) throw err;
+      photonRest = Date.now() + SUGGEST.photonRest;
+    }
+  }
+  return stadiaSuggestions(text, from, signal);
+}
+// From the servers: postcodes, and places unless it's a whole postcode. Says whether both answered.
 async function remoteSuggestions(text, from, signal) {
   const [codes, places] = await Promise.allSettled([
     postcodeSuggestions(text, signal),
-    wholePostcode(text) ? Promise.resolve([]) : photonSuggestions(text, from, signal)]);
+    wholePostcode(text) ? Promise.resolve([]) : placeSuggestions(text, from, signal)]);
   const failed = [codes, places].some(r => r.status === "rejected" && !(r.reason && r.reason.name === "AbortError"));
   if (failed) remoteRest = Date.now() + SUGGEST.rest;
   return { codes: codes.status === "fulfilled" ? codes.value : [], places: places.status === "fulfilled" ? places.value : [],
@@ -3763,13 +3849,28 @@ function setUpDriving() {
 let map = null, layer = null;
 const markers = new Map();
 
+// The map's pictures: Stadia Maps' quiet style, so routes and spots stand out (each picture uses a credit of the
+// free plan, and pictures already seen come from the phone for six hours). If Stadia's stop coming, six in a row
+// while online (the credit used up, say), OpenStreetMap's own instead.
+const OSM_CREDIT = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
+const TILES = {
+  stadia: ["https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png", { maxZoom: 20,
+    attribution: '&copy; <a href="https://stadiamaps.com/attribution/" target="_blank" rel="noopener">Stadia Maps</a> ' +
+                 '&copy; <a href="https://openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> ' + OSM_CREDIT }],
+  osm: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 20, maxNativeZoom: 19, attribution: OSM_CREDIT }],
+};
+
 function setUpMap() {
   if (!window.L) { $("map").hidden = true; return; }  // the map library didn't load: the lists still work
   map = L.map("map", { zoomSnap: 0.5 });
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-  }).addTo(map);
+  const tiles = L.tileLayer(...TILES.stadia).addTo(map);
+  let missed = 0;
+  tiles.on("tileload", () => { missed = 0; });
+  tiles.on("tileerror", () => {
+    if (++missed < 6 || !navigator.onLine || !map.hasLayer(tiles)) return;
+    map.removeLayer(tiles);
+    L.tileLayer(...TILES.osm).addTo(map);
+  });
   layer = L.layerGroup().addTo(map);
   map.setView([54.4, -2.6], 5);  // the whole of Great Britain, until there's something to show
   window.addEventListener("resize", () => map.invalidateSize());
